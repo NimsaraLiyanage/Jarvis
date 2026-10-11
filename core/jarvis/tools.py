@@ -11,6 +11,7 @@ import json
 import os
 import re
 import socket
+import time
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,6 +27,13 @@ from . import vision, winput
 TYPE_MAX_CHARS = 4000
 NOTEPAD_READ_MAX_CHARS = 8000
 SAVE_MAX_CHARS = 20_000
+# Time for a window to finish drawing after it comes to the front, before the screenshot.
+CLICK_SETTLE_S = 0.6
+# Time for a right-click menu to open, or a clicked field to take the keyboard.
+MENU_OPEN_S = 0.6
+FIELD_FOCUS_S = 0.3
+# Mouse-wheel notches for each scroll amount the model can ask for.
+SCROLL_NOTCHES = {"little": 3, "page": 8, "far": 40}
 # The only places a file may be saved, by Windows known-folder id.
 SAVE_FOLDERS = {
     "desktop": "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}",
@@ -84,6 +92,25 @@ def _one_string(name: str, description: str, enum: list[str] | None = None) -> d
     if enum:
         prop["enum"] = enum
     return {"type": "object", "properties": {name: prop}, "required": [name], "additionalProperties": False}
+
+
+_TARGET_HELP = (
+    "Describe it so it cannot be confused with anything else on screen, for example 'the first video thumbnail "
+    "in the results' or 'the blue Sign in button at the top right'."
+)
+
+
+def _on_screen(**params: str | dict[str, Any]) -> dict[str, Any]:
+    """Parameters for a tool that acts inside one app's window: the app, then the given ones (a description means a string)."""
+    properties: dict[str, Any] = {
+        "app": {
+            "type": "string",
+            "description": "The app whose window to act in: a name or program name from list_open_apps, for example 'chrome'.",
+        }
+    }
+    for name, spec in params.items():
+        properties[name] = {"type": "string", "description": spec} if isinstance(spec, str) else spec
+    return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
 
 def _function(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -148,6 +175,58 @@ DEFINITIONS = [
         "asks you to look at, see or read their screen, or about something that is only visible on screen. "
         "For text in Notepad use read_notepad instead. The user is asked to allow it on screen first.",
         _one_string("question", "What to find out from the screen, as a complete question."),
+    ),
+    _function(
+        "click_on_screen",
+        "Left-click once on something visible in an open app window, such as a button, link, video or tab. Use "
+        "when the user asks you to click, press, select or play something on screen. The window is brought to the "
+        "front and a screenshot is used to find the target, so it works only for things visible without scrolling; "
+        "a page you just opened needs a moment to load first. Use scroll_in_app first to reach something further "
+        "down. The user is asked to allow it on screen first.",
+        _on_screen(target=_TARGET_HELP),
+    ),
+    _function(
+        "type_on_screen",
+        "Click a text field visible in an open app window or web page and type into it, for example a search box "
+        "or a form field. Use when the user asks you to type, enter, fill in or search for something inside an app "
+        "or page. The text is added to whatever the field already holds. For Notepad use type_in_notepad instead. "
+        "The user is asked to allow it on screen first.",
+        _on_screen(
+            field="The field to type in, described so it cannot be confused with anything else on screen, for example 'the search box at the top of the page'.",
+            text="Exactly what to type.",
+            press_enter={"type": "boolean", "description": "True to press Enter afterwards, for example to run a search."},
+        ),
+    ),
+    _function(
+        "right_click_menu",
+        "Right-click something visible in an open app window, then left-click one item in the menu that opens. Use "
+        "when the user asks for something that lives in a right-click menu, such as 'Open link in new tab' or "
+        "'Rename'. Both clicks happen under one approval, because the menu closes as soon as the user touches "
+        "anything else. The user is asked to allow it on screen first.",
+        _on_screen(
+            target="What to right-click. " + _TARGET_HELP,
+            menu_item="The menu item to choose, by its visible text, for example 'Open link in new tab'.",
+        ),
+    ),
+    _function(
+        "drag_on_screen",
+        "Drag something visible in an open app window to another place in the same window, holding the left mouse "
+        "button: move an item, a slider or a divider. Use when the user asks you to drag or move something on "
+        "screen. Both ends must be visible in the same window. The user is asked to allow it on screen first.",
+        _on_screen(
+            item="What to pick up. " + _TARGET_HELP,
+            destination="Where to drop it, described as something visible on screen, for example 'the Done column' or 'the right end of the volume slider'.",
+        ),
+    ),
+    _function(
+        "scroll_in_app",
+        "Scroll an open app window or web page up or down with the mouse wheel, to bring more of it into view. Use "
+        "when the user asks you to scroll, or before clicking something that is further down the page. Runs "
+        "without asking the user.",
+        _on_screen(
+            direction={"type": "string", "enum": ["down", "up"], "description": "Which way to scroll."},
+            amount={"type": "string", "enum": sorted(SCROLL_NOTCHES), "description": "How far: a few lines, about one screen, or a long way towards the top or bottom."},
+        ),
     ),
     _function(
         "save_text_file",
@@ -360,6 +439,119 @@ def _look_at_screen(question: str) -> ToolResult:
     return ToolResult("Looked at the screen", answer)
 
 
+# These tools send input blind: nothing checks what the app did with it.
+_UNCHECKED = "What happened next was not checked; use look_at_screen if you need to confirm it."
+
+
+class _NotFound(Exception):
+    """Something the model described is not visible in the screenshot."""
+
+
+def _find(*targets: str) -> list[tuple[float, float, str]]:
+    """Locate each described thing in one fresh screenshot: (x, y, the model's name for it)."""
+    shot = vision.capture_screen()
+    spots = []
+    for target in targets:
+        spot = vision.locate(shot, target)
+        if spot is None:
+            raise _NotFound(target)
+        spots.append(spot)
+    return spots
+
+
+def _in_window(app: str, action: Callable[[winput.Window], ToolResult]) -> ToolResult:
+    """Bring the app's front-most window forward, run the action on it, and turn its failures into results."""
+    windows = _windows_of(app)
+    if not windows:
+        return ToolResult(f"Nothing open matches “{app}”", f"No open window matches '{app}'.")
+    window = windows[0]
+    try:
+        winput.bring_to_front(window)
+        time.sleep(CLICK_SETTLE_S)
+        return action(window)
+    except _NotFound as e:
+        return ToolResult(
+            f"Could not find “{e}”",
+            f"'{e}' was not found on screen in {window.title}. It may be off screen, still loading, or the "
+            "description may match several things. Anything this tool had already done before that stays done.",
+        )
+    except (winput.TypingError, vision.VisionError) as e:
+        return ToolResult(f"Stopped in {window.process}", f"Error: {e}.")
+
+
+def _click_on_screen(app: str, target: str) -> ToolResult:
+    def action(window: winput.Window) -> ToolResult:
+        [(x, y, element)] = _find(target)
+        winput.click_in_window(window, x, y)
+        return ToolResult(
+            f"Clicked {element}",
+            f"Clicked once in {window.title} on what the screenshot showed as: {element}. {_UNCHECKED}",
+        )
+
+    return _in_window(app, action)
+
+
+def _type_on_screen(app: str, field: str, text: str, press_enter: bool) -> ToolResult:
+    if len(text) > TYPE_MAX_CHARS:
+        return ToolResult("Text too long to type", f"Error: text is limited to {TYPE_MAX_CHARS} characters.")
+
+    def action(window: winput.Window) -> ToolResult:
+        [(x, y, element)] = _find(field)
+        winput.click_in_window(window, x, y)
+        time.sleep(FIELD_FOCUS_S)
+        winput.type_in_window(window, text + ("\n" if press_enter else ""))
+        return ToolResult(
+            f"Typed {len(text)} characters in {element}",
+            f"Clicked what the screenshot showed as: {element}, in {window.title}, then typed the text"
+            f"{' and pressed Enter' if press_enter else ''}. {_UNCHECKED}",
+        )
+
+    return _in_window(app, action)
+
+
+def _right_click_menu(app: str, target: str, menu_item: str) -> ToolResult:
+    def action(window: winput.Window) -> ToolResult:
+        [(x, y, element)] = _find(target)
+        winput.click_in_window(window, x, y, right=True)
+        time.sleep(MENU_OPEN_S)
+        # The menu only exists now, so it needs a second screenshot.
+        [(x, y, chosen)] = _find(f"the item '{menu_item}' in the right-click menu that is open")
+        winput.click_in_window(window, x, y)
+        return ToolResult(
+            f"Chose {chosen} on {element}",
+            f"Right-clicked what the screenshot showed as: {element}, in {window.title}, then clicked the menu "
+            f"item: {chosen}. {_UNCHECKED}",
+        )
+
+    return _in_window(app, action)
+
+
+def _drag_on_screen(app: str, item: str, destination: str) -> ToolResult:
+    def action(window: winput.Window) -> ToolResult:
+        (x1, y1, picked), (x2, y2, dropped) = _find(item, destination)
+        winput.drag_in_window(window, (x1, y1), (x2, y2))
+        return ToolResult(
+            f"Dragged {picked} to {dropped}",
+            f"In {window.title}, dragged what the screenshot showed as: {picked}, and dropped it on: {dropped}. {_UNCHECKED}",
+        )
+
+    return _in_window(app, action)
+
+
+def _scroll_in_app(app: str, direction: str, amount: str) -> ToolResult:
+    if direction not in ("down", "up") or amount not in SCROLL_NOTCHES:
+        return ToolResult("Bad input for scroll_in_app", f"Error: direction must be down or up, and amount one of: {', '.join(SCROLL_NOTCHES)}.")
+
+    def action(window: winput.Window) -> ToolResult:
+        winput.scroll_window(window, SCROLL_NOTCHES[amount] * (1 if direction == "down" else -1))
+        return ToolResult(
+            f"Scrolled {direction} in {window.process}",
+            f"Turned the mouse wheel {direction} over the middle of {window.title}. {_UNCHECKED}",
+        )
+
+    return _in_window(app, action)
+
+
 def _safe_filename(name: str) -> str:
     """Reduce whatever the model asked for to a plain .txt file name with no path in it."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name.replace("\\", "/").rsplit("/", 1)[-1])
@@ -425,6 +617,11 @@ _HANDLERS: dict[str, Callable[..., ToolResult]] = {
     "save_text_file": _save_text_file,
     "read_notepad": _read_notepad,
     "look_at_screen": _look_at_screen,
+    "click_on_screen": _click_on_screen,
+    "type_on_screen": _type_on_screen,
+    "right_click_menu": _right_click_menu,
+    "drag_on_screen": _drag_on_screen,
+    "scroll_in_app": _scroll_in_app,
     "list_open_apps": _list_open_apps,
     "close_app": _close_app,
     "get_system_status": _get_system_status,
@@ -439,8 +636,23 @@ _STRING_ARGS: dict[str, tuple[str, ...]] = {
     "type_in_notepad": ("text",),
     "save_text_file": ("folder", "filename", "text"),
     "look_at_screen": ("question",),
+    "click_on_screen": ("app", "target"),
+    "type_on_screen": ("app", "field", "text"),
+    "right_click_menu": ("app", "target", "menu_item"),
+    "drag_on_screen": ("app", "item", "destination"),
+    "scroll_in_app": ("app", "direction", "amount"),
     "close_app": ("app",),
 }
+# The true/false arguments each tool takes, passed to its handler after the strings.
+_FLAG_ARGS: dict[str, tuple[str, ...]] = {"type_on_screen": ("press_enter",)}
+
+
+def _screen_prompt(app: str, what: str, then: str) -> str:
+    """Detail for a prompt about acting in a window; the exact spot is only known after the screenshot."""
+    return (
+        f"{what}\n\nIn: {_windows_of(app)[0].title}\n"
+        f"That window comes to the front, a screenshot of your whole screen is sent to OpenAI to find the spot, and Jarvis {then}."
+    )
 # Tools that change something. Each maps its arguments to the (title, detail)
 # shown to the user, who must allow that exact action before it runs.
 _CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
@@ -459,15 +671,36 @@ _CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
         f"Save this as a file in {folder.capitalize()}?",
         f"{_safe_filename(filename)}\n\n{text}",
     ),
+    "click_on_screen": lambda app, target: ("Let Jarvis click this?", _screen_prompt(app, target, "left-clicks it once")),
+    "type_on_screen": lambda app, field, text, press_enter: (
+        "Let Jarvis type this?",
+        _screen_prompt(
+            app,
+            f"{text}\n\nInto: {field}",
+            "clicks the field and types the text" + (", then presses Enter" if press_enter else ""),
+        ),
+    ),
+    "right_click_menu": lambda app, target, menu_item: (
+        f"Let Jarvis choose “{menu_item}” from a right-click menu?",
+        _screen_prompt(app, f"Right-click: {target}", f"right-clicks it, takes a second screenshot and clicks “{menu_item}”"),
+    ),
+    "drag_on_screen": lambda app, item, destination: (
+        "Let Jarvis drag this?",
+        _screen_prompt(app, f"{item}\n\nTo: {destination}", "drags one onto the other with the left button"),
+    ),
 }
 
 # Checks that run before the user is asked, so a bad request never reaches the prompt.
-_PRECHECK: dict[str, Callable[..., ToolResult | None]] = {"save_text_file": _check_save, "close_app": _check_close}
+_PRECHECK: dict[str, Callable[..., ToolResult | None]] = {
+    "save_text_file": _check_save,
+    "close_app": _check_close,
+    **{name: lambda app, *_: _check_close(app) for name in ("click_on_screen", "type_on_screen", "right_click_menu", "drag_on_screen")},
+}
 
 Approver = Callable[[str, str], Awaitable[bool]]
 
 
-def _prepare(name: str, arguments: str) -> ToolResult | tuple[Callable[..., ToolResult], list[str]]:
+def _prepare(name: str, arguments: str) -> ToolResult | tuple[Callable[..., ToolResult], list[Any]]:
     """Validate a call the model produced. Returns the handler and its arguments, or an error result."""
     handler = _HANDLERS.get(name)
     if handler is None:
@@ -477,12 +710,17 @@ def _prepare(name: str, arguments: str) -> ToolResult | tuple[Callable[..., Tool
     except ValueError:
         return ToolResult(f"Bad input for {name}", "Error: the tool arguments were not valid JSON.")
 
-    values: list[str] = []
+    values: list[Any] = []
     for arg_name in _STRING_ARGS.get(name, ()):
         value = args.get(arg_name) if isinstance(args, dict) else None
         if not isinstance(value, str) or not value.strip():
             return ToolResult(f"Bad input for {name}", f"Error: '{arg_name}' must be a non-empty string.")
         values.append(value.strip())
+    for arg_name in _FLAG_ARGS.get(name, ()):
+        value = args.get(arg_name) if isinstance(args, dict) else None
+        if not isinstance(value, bool):
+            return ToolResult(f"Bad input for {name}", f"Error: '{arg_name}' must be true or false.")
+        values.append(value)
     return handler, values
 
 

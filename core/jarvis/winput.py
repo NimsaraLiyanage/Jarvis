@@ -1,4 +1,4 @@
-"""Windows-specific helpers: typing into Notepad and locating user folders."""
+"""Windows-specific helpers: typing into Notepad, clicking in a window and locating user folders."""
 
 import ctypes
 import subprocess
@@ -13,7 +13,28 @@ user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 dwmapi = ctypes.WinDLL("dwmapi")
 
+INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_WHEEL = 0x0800
+WHEEL_DELTA = 120
+MOUSEEVENTF_ABSOLUTE = 0x8000
+# Absolute mouse positions run from 0 to this across the primary monitor, whatever its resolution or scaling.
+MOUSE_ABSOLUTE_MAX = 65535
+SM_CXSCREEN = 0
+SM_CYSCREEN = 1
+GA_ROOT = 2
+GA_ROOTOWNER = 3
+# Window class of a classic right-click menu.
+MENU_CLASS = "#32768"
+# A drag is sent as this many small moves, since apps ignore a pointer that jumps straight to the end.
+DRAG_STEPS = 20
+DRAG_STEP_DELAY_S = 0.02
+SCROLL_DELAY_S = 0.02
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 VK_RETURN = 0x0D
@@ -84,6 +105,11 @@ user32.FindWindowExW.argtypes =(wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, 
 user32.FindWindowExW.restype = wintypes.HWND
 user32.SendMessageW.argtypes = (wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p)
 user32.SendMessageW.restype = ctypes.c_ssize_t
+user32.WindowFromPoint.argtypes = (wintypes.POINT,)
+user32.WindowFromPoint.restype = wintypes.HWND
+user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
+user32.GetAncestor.restype = wintypes.HWND
+user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
 EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -106,7 +132,7 @@ def known_folder(folder_id: str) -> Path:
 
 
 class TypingError(Exception):
-    """Typing could not start or was stopped; the message is safe to show."""
+    """Typing or clicking could not start or was stopped; the message is safe to show."""
 
 
 def _key(vk: int = 0, scan: int = 0, flags: int = 0) -> INPUT:
@@ -254,7 +280,108 @@ def _bring_to_front(hwnd: int) -> None:
         if user32.GetForegroundWindow() == hwnd:
             return
         time.sleep(0.05)
-    raise TypingError("Notepad could not be brought to the front")
+    raise TypingError("the window could not be brought to the front")
+
+
+def bring_to_front(window: Window) -> None:
+    """Make the window the active one, restoring it if it is minimised."""
+    _bring_to_front(window.hwnd)
+
+
+def _send(*events: INPUT) -> None:
+    array = (INPUT * len(events))(*events)
+    user32.SendInput(len(events), array, ctypes.sizeof(INPUT))
+
+
+def _mouse(flags: int, x: float, y: float, data: int = 0) -> INPUT:
+    """A mouse event at a point given as fractions (0-1) of the primary monitor's width and height."""
+    return INPUT(
+        type=INPUT_MOUSE,
+        mi=MOUSEINPUT(
+            dx=round(x * MOUSE_ABSOLUTE_MAX),
+            dy=round(y * MOUSE_ABSOLUTE_MAX),
+            mouseData=data & 0xFFFFFFFF,
+            dwFlags=flags | MOUSEEVENTF_ABSOLUTE,
+        ),
+    )
+
+
+def _require_inside(window: Window, x: float, y: float) -> None:
+    """Stop with TypingError unless the point is on the window or one of its own popups and menus."""
+    point = wintypes.POINT(
+        round(x * (user32.GetSystemMetrics(SM_CXSCREEN) - 1)),
+        round(y * (user32.GetSystemMetrics(SM_CYSCREEN) - 1)),
+    )
+    hit = user32.WindowFromPoint(point)
+    if user32.GetAncestor(hit, GA_ROOTOWNER) == window.hwnd:
+        return
+    # A classic right-click menu has no owner, so it is matched by the program it belongs to.
+    class_name = ctypes.create_unicode_buffer(64)
+    user32.GetClassNameW(user32.GetAncestor(hit, GA_ROOT), class_name, len(class_name))
+    hit_pid, window_pid = wintypes.DWORD(), wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hit, ctypes.byref(hit_pid))
+    user32.GetWindowThreadProcessId(window.hwnd, ctypes.byref(window_pid))
+    if class_name.value == MENU_CLASS and hit_pid.value == window_pid.value:
+        return
+    raise TypingError("that spot is not inside the window, so nothing was done there")
+
+
+def click_in_window(window: Window, x: float, y: float, right: bool = False) -> None:
+    """Click once at a point on the primary monitor, given as fractions (0-1) of its width and height.
+
+    Stops with TypingError unless that point is on the given window or one of its
+    own popups, so a click never lands in a different app.
+    """
+    _require_inside(window, x, y)
+    down, up = (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP) if right else (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)
+    _send(_mouse(MOUSEEVENTF_MOVE, x, y), _mouse(down, x, y), _mouse(up, x, y))
+
+
+def drag_in_window(window: Window, start: tuple[float, float], end: tuple[float, float]) -> None:
+    """Hold the left button at one point of the window and release it at another."""
+    _require_inside(window, *start)
+    _require_inside(window, *end)
+    _send(_mouse(MOUSEEVENTF_MOVE, *start), _mouse(MOUSEEVENTF_LEFTDOWN, *start))
+    try:
+        time.sleep(0.15)
+        for step in range(1, DRAG_STEPS + 1):
+            t = step / DRAG_STEPS
+            _send(_mouse(MOUSEEVENTF_MOVE, start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t))
+            time.sleep(DRAG_STEP_DELAY_S)
+        time.sleep(0.15)
+    finally:
+        # Always let go, or the button stays held down for the user.
+        _send(_mouse(MOUSEEVENTF_LEFTUP, *end))
+
+
+def scroll_window(window: Window, notches: int) -> None:
+    """Turn the mouse wheel over the middle of the window; positive notches scroll down."""
+    rect = wintypes.RECT()
+    user32.GetWindowRect(window.hwnd, ctypes.byref(rect))
+    x = (rect.left + rect.right) / 2 / (user32.GetSystemMetrics(SM_CXSCREEN) - 1)
+    y = (rect.top + rect.bottom) / 2 / (user32.GetSystemMetrics(SM_CYSCREEN) - 1)
+    if not (0 <= x <= 1 and 0 <= y <= 1):
+        raise TypingError("the middle of the window is not on the main screen")
+    _require_inside(window, x, y)
+    _send(_mouse(MOUSEEVENTF_MOVE, x, y))
+    delta = -WHEEL_DELTA if notches > 0 else WHEEL_DELTA
+    for _ in range(abs(notches)):
+        _send(_mouse(MOUSEEVENTF_WHEEL, x, y, delta))
+        time.sleep(SCROLL_DELAY_S)
+
+
+def _type(hwnd: int, text: str, name: str) -> None:
+    """Send the text as keystrokes, stopping as soon as the window is no longer the active one."""
+    for i, char in enumerate(text.replace("\r\n", "\n")):
+        if i % FOCUS_CHECK_EVERY == 0 and user32.GetForegroundWindow() != hwnd:
+            raise TypingError(f"{name} lost focus, so typing stopped after {i} of {len(text)} characters")
+        _press(char)
+        time.sleep(KEY_DELAY_S)
+
+
+def type_in_window(window: Window, text: str) -> None:
+    """Type text into whatever has the keyboard focus in the window, which must be the active one."""
+    _type(window.hwnd, text, "The window")
 
 
 def type_in_notepad(text: str) -> bool:
@@ -267,10 +394,5 @@ def type_in_notepad(text: str) -> bool:
     hwnd = existing[0] if existing else _open_notepad()
     _bring_to_front(hwnd)
     time.sleep(0.15)
-
-    for i, char in enumerate(text.replace("\r\n", "\n")):
-        if i % FOCUS_CHECK_EVERY == 0 and user32.GetForegroundWindow() != hwnd:
-            raise TypingError(f"Notepad lost focus, so typing stopped after {i} of {len(text)} characters")
-        _press(char)
-        time.sleep(KEY_DELAY_S)
+    _type(hwnd, text, "Notepad")
     return not existing

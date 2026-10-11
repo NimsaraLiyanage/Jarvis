@@ -60,20 +60,21 @@ Credits: `head.glb` is the sample head from the three.js examples (`facecap.glb`
 
 Jarvis can search the web, open a fixed list of apps, open websites, open a Google search in the browser, read the text of a public web page, and read the system status and time. The tools live in `core/jarvis/tools.py` and work from both typed chat and voice. Most only open things or read status and run straight away.
 
-Tools that change something ask first: an Allow/Deny card appears above the chat box showing exactly what will happen, and no answer within 60 seconds counts as deny. Four tools work this way:
+Tools that change something ask first: an Allow/Deny card appears above the chat box showing exactly what will happen, and no answer within 60 seconds counts as deny. These tools work this way:
 
 - Closing an app's windows, the same as clicking their X. The prompt lists the exact windows. Nothing is force-closed, so an app with unsaved work shows its own save prompt, and the window showing Jarvis is never closed.
 - Typing into Notepad, which stops the moment Notepad loses focus.
 - Saving text as a new `.txt` file, only on the Desktop or in Documents, never overwriting an existing file.
 - Looking at the screen: a screenshot of the primary monitor is sent to OpenAI to answer one question. It asks every time because everything visible is sent.
+- Working inside an app window or web page: the named app's window comes to the front, a screenshot is sent to OpenAI to find the thing described, and Jarvis acts on it. It can left-click once, click a field and type into it (optionally pressing Enter), drag one thing onto another, or right-click something and choose an item from the menu, which takes a second screenshot once the menu is open. The prompt shows the window and the description; the exact spot is only known afterwards. Input that would land outside that window is not sent, and typing stops if the window loses focus. It only finds what is visible on the primary monitor, and how well it aims depends on the model. Run Jarvis with `npm run desktop` for this: as a browser tab it shares a window with the page you want used, and pressing Allow puts Jarvis's tab in front.
 
-Reading the text in open Notepad windows needs no prompt.
+Reading the text in open Notepad windows needs no prompt. Neither does scrolling an app window, which turns the mouse wheel over the middle of it and sends no screenshot.
 
 ## Roadmap
 
 1. ~~Foundation, streaming chat, HUD~~
 2. Voice: ~~spoken conversation~~, wake word
-3. Tools: ~~web search, open apps and sites, read pages, system status, confirmation prompt, typing in Notepad~~, browser control, files
+3. Tools: ~~web search, open apps and sites, read pages, system status, confirmation prompt, typing in Notepad, clicking, typing, scrolling and dragging on screen~~, browser control, files
 4. Memory: conversation history and facts about you
 5. Integrations: calendar, mail, reminders, morning brief
 6. Polish: tray, global hotkey, installer
