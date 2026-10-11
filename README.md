@@ -48,7 +48,13 @@ GPT-Live is billed per second while a session is open, so end the session when y
 
 Jarvis can search the web, open a fixed list of apps, open websites, open a Google search in the browser, read the text of a public web page, and read the system status and time. The tools live in `core/jarvis/tools.py` and work from both typed chat and voice. Most only open things or read status and run straight away.
 
-Tools that change something ask first: an Allow/Deny card appears above the chat box showing exactly what will happen, and no answer within 60 seconds counts as deny. The first such tool types text into Notepad; it stops typing the moment Notepad loses focus.
+Tools that change something ask first: an Allow/Deny card appears above the chat box showing exactly what will happen, and no answer within 60 seconds counts as deny. Three tools work this way:
+
+- Typing into Notepad, which stops the moment Notepad loses focus.
+- Saving text as a new `.txt` file, only on the Desktop or in Documents, never overwriting an existing file.
+- Looking at the screen: a screenshot of the primary monitor is sent to OpenAI to answer one question. It asks every time because everything visible is sent.
+
+Reading the text in open Notepad windows needs no prompt.
 
 ## Roadmap
 

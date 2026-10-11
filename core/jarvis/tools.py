@@ -9,6 +9,7 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
 import socket
 import webbrowser
 from dataclasses import dataclass
@@ -20,9 +21,17 @@ from urllib.parse import quote_plus, urljoin, urlparse
 import httpx2 as httpx
 import psutil
 
-from . import winput
+from . import vision, winput
 
 TYPE_MAX_CHARS = 4000
+NOTEPAD_READ_MAX_CHARS = 8000
+SAVE_MAX_CHARS = 20_000
+# The only places a file may be saved, by Windows known-folder id.
+SAVE_FOLDERS = {
+    "desktop": "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}",
+    "documents": "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}",
+}
+WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
 PAGE_TIMEOUT_S = 12
 PAGE_MAX_REDIRECTS = 5
@@ -99,6 +108,36 @@ DEFINITIONS = [
         "Use when the user asks you to write, type or note something down in Notepad. "
         "The user is asked to allow it on screen first, so tell them to look for the prompt.",
         _one_string("text", "Exactly what to type. Use \\n for a new line."),
+    ),
+    _function(
+        "read_notepad",
+        "Read the text currently in the user's open Notepad windows. Use when the user refers to what is in "
+        "Notepad, for example to save it, read it back or use it. This is the reliable way to see Notepad text.",
+        _no_args(),
+    ),
+    _function(
+        "look_at_screen",
+        "Take a screenshot of the user's screen and answer a question about what is visible. Use when the user "
+        "asks you to look at, see or read their screen, or about something that is only visible on screen. "
+        "For text in Notepad use read_notepad instead. The user is asked to allow it on screen first.",
+        _one_string("question", "What to find out from the screen, as a complete question."),
+    ),
+    _function(
+        "save_text_file",
+        "Save text as a new .txt file on the user's Desktop or in their Documents folder. Use when the user asks "
+        "to save a note, or to save what you typed in Notepad: pass that same text again in full, because this "
+        "tool writes the file itself and cannot see the Notepad window. It never overwrites an existing file. "
+        "The user is asked to allow it on screen first.",
+        {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "enum": sorted(SAVE_FOLDERS), "description": "Where to save. Use desktop unless the user says otherwise."},
+                "filename": {"type": "string", "description": "Short descriptive file name, for example 'phone number.txt'."},
+                "text": {"type": "string", "description": "The complete contents of the file."},
+            },
+            "required": ["folder", "filename", "text"],
+            "additionalProperties": False,
+        },
     ),
     _function(
         "get_system_status",
@@ -235,6 +274,61 @@ def _type_in_notepad(text: str) -> ToolResult:
     return ToolResult(f"Typed {len(text)} characters in Notepad", f"Typed the text into {where}.")
 
 
+def _read_notepad() -> ToolResult:
+    windows = winput.read_notepad_windows(NOTEPAD_READ_MAX_CHARS)
+    if not windows:
+        return ToolResult("No Notepad window is open", "No Notepad window is open.")
+    parts = [f"Window {i} ({title}):\n{text or '[empty]'}" for i, (title, text) in enumerate(windows, 1)]
+    count = "1 Notepad window" if len(windows) == 1 else f"{len(windows)} Notepad windows"
+    return ToolResult(f"Read {count}", f"{count} open, front-most first.\n\n" + "\n\n".join(parts))
+
+
+def _look_at_screen(question: str) -> ToolResult:
+    try:
+        answer = vision.describe(vision.capture_screen(), question)
+    except vision.VisionError as e:
+        return ToolResult("Could not look at the screen", f"Error: {e}.")
+    return ToolResult("Looked at the screen", answer)
+
+
+def _safe_filename(name: str) -> str:
+    """Reduce whatever the model asked for to a plain .txt file name with no path in it."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name.replace("\\", "/").rsplit("/", 1)[-1])
+    stem = (name[:-4] if name.lower().endswith(".txt") else name).strip(" .")[:80]
+    if not stem or stem.upper() in WINDOWS_RESERVED_NAMES:
+        stem = "note"
+    return f"{stem}.txt"
+
+
+def _check_save(folder: str, filename: str, text: str) -> ToolResult | None:
+    """Reject a save the user should never even be asked about."""
+    if folder not in SAVE_FOLDERS:
+        return ToolResult(f"Unknown folder: {folder}", f"Error: files can only be saved to: {', '.join(SAVE_FOLDERS)}.")
+    if len(text) > SAVE_MAX_CHARS:
+        return ToolResult("Text too long to save", f"Error: text is limited to {SAVE_MAX_CHARS} characters.")
+    return None
+
+
+def _save_text_file(folder: str, filename: str, text: str) -> ToolResult:
+    try:
+        directory = winput.known_folder(SAVE_FOLDERS[folder])
+        base = _safe_filename(filename)
+        # Mode "x" refuses to overwrite, so an existing file gets a numbered sibling instead.
+        for n in range(1, 100):
+            path = directory / (base if n == 1 else f"{base[:-4]} ({n}).txt")
+            try:
+                with open(path, "x", encoding="utf-8") as f:
+                    f.write(text)
+                break
+            except FileExistsError:
+                continue
+        else:
+            return ToolResult("Could not save the file", "Error: too many files already have that name.")
+    except OSError as e:
+        return ToolResult("Could not save the file", f"Error: the file could not be saved ({e}).")
+    return ToolResult(f"Saved {path.name} to {folder.capitalize()}", f"Saved as {path}.")
+
+
 def _get_system_status() -> ToolResult:
     mem = psutil.virtual_memory()
     battery = psutil.sensors_battery()
@@ -259,21 +353,39 @@ _HANDLERS: dict[str, Callable[..., ToolResult]] = {
     "search_in_browser": _search_in_browser,
     "read_webpage": _read_webpage,
     "type_in_notepad": _type_in_notepad,
+    "save_text_file": _save_text_file,
+    "read_notepad": _read_notepad,
+    "look_at_screen": _look_at_screen,
     "get_system_status": _get_system_status,
     "get_datetime": _get_datetime,
 }
-_STRING_ARG = {
-    "open_app": "app",
-    "open_website": "url",
-    "search_in_browser": "query",
-    "read_webpage": "url",
-    "type_in_notepad": "text",
+# The string arguments each tool takes, in the order its handler expects them.
+_STRING_ARGS: dict[str, tuple[str, ...]] = {
+    "open_app": ("app",),
+    "open_website": ("url",),
+    "search_in_browser": ("query",),
+    "read_webpage": ("url",),
+    "type_in_notepad": ("text",),
+    "save_text_file": ("folder", "filename", "text"),
+    "look_at_screen": ("question",),
 }
-# Tools that change something. Each maps its argument to the (title, detail)
+# Tools that change something. Each maps its arguments to the (title, detail)
 # shown to the user, who must allow that exact action before it runs.
-_CONFIRM: dict[str, Callable[[str], tuple[str, str]]] = {
+_CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
     "type_in_notepad": lambda text: ("Type this into Notepad?", text),
+    # Everything visible goes to OpenAI, so the user decides each time.
+    "look_at_screen": lambda question: (
+        "Let Jarvis look at your screen?",
+        f"A screenshot of your whole screen will be sent to OpenAI to answer:\n{question}",
+    ),
+    "save_text_file": lambda folder, filename, text: (
+        f"Save this as a file in {folder.capitalize()}?",
+        f"{_safe_filename(filename)}\n\n{text}",
+    ),
 }
+
+# Checks that run before the user is asked, so a bad request never reaches the prompt.
+_PRECHECK: dict[str, Callable[..., ToolResult | None]] = {"save_text_file": _check_save}
 
 Approver = Callable[[str, str], Awaitable[bool]]
 
@@ -288,13 +400,13 @@ def _prepare(name: str, arguments: str) -> ToolResult | tuple[Callable[..., Tool
     except ValueError:
         return ToolResult(f"Bad input for {name}", "Error: the tool arguments were not valid JSON.")
 
-    arg_name = _STRING_ARG.get(name)
-    if arg_name is None:
-        return handler, []
-    value = args.get(arg_name) if isinstance(args, dict) else None
-    if not isinstance(value, str) or not value.strip():
-        return ToolResult(f"Bad input for {name}", f"Error: '{arg_name}' must be a non-empty string.")
-    return handler, [value.strip()]
+    values: list[str] = []
+    for arg_name in _STRING_ARGS.get(name, ()):
+        value = args.get(arg_name) if isinstance(args, dict) else None
+        if not isinstance(value, str) or not value.strip():
+            return ToolResult(f"Bad input for {name}", f"Error: '{arg_name}' must be a non-empty string.")
+        values.append(value.strip())
+    return handler, values
 
 
 async def execute(name: str, arguments: str, approve: Approver) -> ToolResult:
@@ -303,6 +415,11 @@ async def execute(name: str, arguments: str, approve: Approver) -> ToolResult:
     if isinstance(prepared, ToolResult):
         return prepared
     handler, args = prepared
+
+    precheck = _PRECHECK.get(name)
+    problem = precheck(*args) if precheck else None
+    if problem is not None:
+        return problem
 
     describe = _CONFIRM.get(name)
     if describe is not None and not await approve(*describe(*args)):

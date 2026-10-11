@@ -1,9 +1,10 @@
-"""Typing into Notepad through the Windows input APIs."""
+"""Windows-specific helpers: typing into Notepad and locating user folders."""
 
 import ctypes
 import subprocess
 import time
 from ctypes import wintypes
+from pathlib import Path
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -14,6 +15,8 @@ KEYEVENTF_UNICODE = 0x0004
 VK_RETURN = 0x0D
 VK_TAB = 0x09
 SW_RESTORE = 9
+WM_GETTEXT = 0x000D
+WM_GETTEXTLENGTH = 0x000E
 
 NOTEPAD_CLASS = "Notepad"
 LAUNCH_TIMEOUT_S = 6
@@ -60,7 +63,29 @@ user32.SendInput.restype = wintypes.UINT
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.FindWindowExW.argtypes = (wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR)
+user32.FindWindowExW.restype = wintypes.HWND
+user32.SendMessageW.argtypes = (wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p)
+user32.SendMessageW.restype = ctypes.c_ssize_t
 EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [("data", ctypes.c_byte * 16)]
+
+
+def known_folder(folder_id: str) -> Path:
+    """Resolve a Windows known folder (Desktop, Documents) to its real path, even when OneDrive has moved it."""
+    guid = _GUID()
+    ctypes.windll.ole32.CLSIDFromString(folder_id, ctypes.byref(guid))
+    path = ctypes.c_wchar_p()
+    result = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(path))
+    if result != 0 or not path.value:
+        raise OSError(f"Windows could not locate the folder (error {result & 0xFFFFFFFF:#x})")
+    try:
+        return Path(path.value)
+    finally:
+        ctypes.windll.ole32.CoTaskMemFree(path)
 
 
 class TypingError(Exception):
@@ -102,6 +127,23 @@ def _notepad_windows() -> list[int]:
 
     user32.EnumWindows(EnumWindowsProc(visit), 0)
     return found
+
+
+def read_notepad_windows(max_chars: int) -> list[tuple[str, str]]:
+    """(window title, text) for every open Notepad window, front-most first."""
+    windows = []
+    for hwnd in _notepad_windows():
+        title = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        edit = user32.FindWindowExW(hwnd, None, "Edit", None)
+        text = ""
+        if edit:
+            length = min(user32.SendMessageW(edit, WM_GETTEXTLENGTH, 0, None), max_chars)
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.SendMessageW(edit, WM_GETTEXT, length + 1, ctypes.cast(buffer, ctypes.c_void_p))
+            text = buffer.value
+        windows.append((title.value, text))
+    return windows
 
 
 def _open_notepad() -> int:
