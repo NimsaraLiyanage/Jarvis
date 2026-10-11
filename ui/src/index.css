@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --color-ink: #05080f;
+  --color-ink-2: #0a1220;
+  --color-text: #d7e6f5;
+  --color-dim: #7f95ad;
+  --color-accent: rgb(var(--accent));
+  --color-danger: #ff6b7a;
+}
+
+:root {
+  /* Space-separated RGB so it can be used with any alpha. Swapped per orb state. */
+  --accent: 94 230 255;
+  color-scheme: dark;
+}
+
+[data-orb="thinking"] {
+  --accent: 255 182 72;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.backdrop {
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 45%, rgb(var(--accent) / 0.1), transparent 70%),
+    linear-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px) 0 0 / 100% 44px,
+    linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px) 0 0 / 44px 100%,
+    var(--color-ink);
+  transition: background 0.6s;
+}
+
+.panel {
+  position: relative;
+  background: rgb(10 18 32 / 0.6);
+  border: 1px solid rgb(var(--accent) / 0.16);
+  backdrop-filter: blur(10px);
+  transition: border-color 0.6s;
+}
+
+/* HUD corner brackets */
+.panel::before,
+.panel::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(var(--accent) / 0.8);
+  pointer-events: none;
+  transition: border-color 0.6s;
+}
+.panel::before {
+  top: -1px;
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-left: 0;
+  border-top: 0;
+}
+
+.label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgb(var(--accent) / 0.85);
+  transition: color 0.6s;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--accent) / 0.3) transparent;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ring-cw {
+  transform-origin: 50% 50%;
+  animation: spin 40s linear infinite;
+}
+.ring-ccw {
+  transform-origin: 50% 50%;
+  animation: spin 26s linear infinite reverse;
+}
+[data-orb="thinking"] .ring-cw {
+  animation-duration: 6s;
+}
+[data-orb="thinking"] .ring-ccw {
+  animation-duration: 4s;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+.caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: rgb(var(--accent));
+  animation: blink 1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring-cw,
+  .ring-ccw,
+  .caret {
+    animation: none;
+  }
+}

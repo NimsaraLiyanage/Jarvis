@@ -1,0 +1,35 @@
+{
+  "name": "jarvis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal Jarvis assistant - HUD interface and local core",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "setup": "python -m venv core/.venv && core\\.venv\\Scripts\\python -m pip install -r core/requirements.txt",
+    "core": "core\\.venv\\Scripts\\python -m uvicorn jarvis.main:app --app-dir core --host 127.0.0.1 --port 8765",
+    "ui": "vite",
+    "web": "concurrently -k -n core,ui -c cyan,magenta \"npm run core\" \"npm run ui\"",
+    "desktop": "concurrently -k -n core,ui,app -c cyan,magenta,yellow \"npm run core\" \"npm run ui\" \"wait-on http://localhost:5173 && node desktop/launch.cjs\"",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/rajdhani": "^5.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "electron": "^44.7.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "wait-on": "^9.5.1"
+  }
+}
