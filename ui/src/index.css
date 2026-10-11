@@ -14,13 +14,9 @@
 }
 
 :root {
-  /* Space-separated RGB so it can be used with any alpha. Swapped per orb state. */
+  /* Space-separated RGB so it can be used with any alpha. App sets it from the orb theme and state. */
   --accent: 94 230 255;
   color-scheme: dark;
-}
-
-[data-orb="thinking"] {
-  --accent: 255 182 72;
 }
 
 html,
@@ -113,6 +109,19 @@ body {
   animation-duration: 4s;
 }
 
+.face {
+  filter: drop-shadow(0 0 1.5px rgb(var(--accent) / 0.55)) drop-shadow(0 0 16px rgb(var(--accent) / 0.22));
+  transition: color 0.6s;
+}
+@keyframes scan-drift {
+  to {
+    transform: translateY(2.4px);
+  }
+}
+.face-scan {
+  animation: scan-drift 0.5s linear infinite;
+}
+
 @keyframes blink {
   50% {
     opacity: 0.25;
@@ -131,7 +140,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .ring-cw,
   .ring-ccw,
-  .caret {
+  .caret,
+  .face-scan {
     animation: none;
   }
 }

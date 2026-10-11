@@ -2,5 +2,8 @@ node_modules/
 dist/
 .env
 core/.venv/
+# Avatar assets you add yourself; most are licensed for personal use only.
+ui/public/models/avatar.glb
+ui/public/models/custom/
 __pycache__/
 *.pyc

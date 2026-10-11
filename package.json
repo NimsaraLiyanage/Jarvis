@@ -6,7 +6,7 @@
   "main": "desktop/main.cjs",
   "scripts": {
     "setup": "python -m venv core/.venv && core\\.venv\\Scripts\\python -m pip install -r core/requirements.txt",
-    "core": "core\\.venv\\Scripts\\python -m uvicorn jarvis.main:app --app-dir core --host 127.0.0.1 --port 8765 --reload --reload-dir core/jarvis",
+    "core": "node desktop/start-core.cjs",
     "ui": "vite",
     "web": "concurrently -k -n core,ui -c cyan,magenta \"npm run core\" \"npm run ui\"",
     "desktop": "concurrently -k -n core,ui,app -c cyan,magenta,yellow \"npm run core\" \"npm run ui\" \"wait-on http://localhost:5173 && node desktop/launch.cjs\"",

@@ -44,6 +44,14 @@ Hold Space to talk and release it to close the mic (click outside the chat box f
 
 GPT-Live is billed per second while a session is open, so end the session when you are done. Voice and typed chat use different models and do not share conversation history yet.
 
+## Orb appearance
+
+The Orb button in the top bar changes the orb's shape (Sphere, Ring, Galaxy, Face, Face 3D, Robot) and colour theme. Face 3D (`ui/src/Face3D.tsx`) renders a real head model and drives its jaw, lips, blinks, brows and gaze. It loads `ui/public/models/avatar.glb` if you add one, otherwise the bundled `head.glb` (the three.js sample head). Any GLB with ARKit-style face shapes such as `jawOpen` and `eyeBlinkLeft` should work. Face is a drawn hologram portrait (`ui/src/Face.tsx`) whose mouth follows the speech level, and which blinks and shifts its gaze with Jarvis's state. The whole interface takes its accent colour from the theme, and the choice is remembered in the browser. Shapes and themes are defined in `ui/src/orbStyle.ts` and `ui/src/Orb.tsx`.
+
+The Robot shape uses the same component to redraw the bundled head as a face built from mesh nodes: glowing dots joined by the wireframe, with solid glowing eyes. It talks, blinks and looks around the same way, in the theme colour.
+
+Credits: `head.glb` is the sample head from the three.js examples (`facecap.glb`, model by [Face Cap](https://www.bannaflak.com/face-cap)); no licence is stated for it there. The files in `ui/public/basis/` are the Basis Universal texture transcoder shipped with three.js.
+
 ## Tools
 
 Jarvis can search the web, open a fixed list of apps, open websites, open a Google search in the browser, read the text of a public web page, and read the system status and time. The tools live in `core/jarvis/tools.py` and work from both typed chat and voice. Most only open things or read status and run straight away.

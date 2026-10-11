@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { Orb } from "./Orb";
+import { OrbSettings } from "./OrbSettings";
+import { useOrbStyle } from "./orbStyle";
 import { SystemPanel } from "./SystemPanel";
 import { useJarvis, type LinkStatus, type OrbState } from "./useJarvis";
 import { usePushToTalk, useVoice } from "./useVoice";
@@ -46,6 +48,14 @@ export function App() {
           ? "listening"
           : "idle";
 
+  const orbStyle = useOrbStyle();
+  // The whole UI takes its accent from the orb's theme, switching while Jarvis is thinking.
+  const accent = orbState === "thinking" ? orbStyle.theme.thinkAccent : orbStyle.theme.accent;
+  // Set on the root element: the accent colour utilities are resolved there, not on this component.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--accent", accent);
+  }, [accent]);
+
   return (
     <div data-orb={orbState} className="backdrop flex h-dvh flex-col">
       <header className="flex items-center justify-between px-4 pt-3 sm:px-6">
@@ -60,7 +70,15 @@ export function App() {
             {LINK_LABEL[jarvis.link]}
           </span>
         </div>
-        <Clock />
+        <div className="flex items-center gap-4">
+          <OrbSettings
+            shape={orbStyle.shape}
+            theme={orbStyle.theme}
+            onShape={orbStyle.setShape}
+            onTheme={orbStyle.setTheme}
+          />
+          <Clock />
+        </div>
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(180px,32vh)_minmax(0,1fr)] gap-4 p-4 sm:px-6 lg:grid-cols-[260px_minmax(0,1fr)_minmax(340px,420px)] lg:grid-rows-1">
@@ -71,7 +89,7 @@ export function App() {
           voice={voice.status}
           voiceReady={jarvis.voiceReady}
         />
-        <Orb state={orbState} energy={jarvis.energy} />
+        <Orb state={orbState} energy={jarvis.energy} shape={orbStyle.shape} theme={orbStyle.theme} />
         <ChatPanel
           messages={jarvis.messages}
           link={jarvis.link}

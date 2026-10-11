@@ -1,5 +1,7 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useRef, type RefObject } from "react";
 import * as THREE from "three";
+import { Face } from "./Face";
+import type { OrbShape, OrbTheme } from "./orbStyle";
 import type { OrbState } from "./useJarvis";
 
 interface Look {
@@ -10,12 +12,16 @@ interface Look {
   b: THREE.Color;
 }
 
-const LOOKS: Record<OrbState, Look> = {
-  idle: { amp: 0.1, freq: 1.3, speed: 0.5, a: new THREE.Color("#2a6bff"), b: new THREE.Color("#5ee6ff") },
-  listening: { amp: 0.17, freq: 1.6, speed: 0.9, a: new THREE.Color("#38d9ff"), b: new THREE.Color("#b6fbff") },
-  thinking: { amp: 0.24, freq: 2.4, speed: 2.0, a: new THREE.Color("#ff6a3d"), b: new THREE.Color("#ffc861") },
-  speaking: { amp: 0.14, freq: 1.8, speed: 1.1, a: new THREE.Color("#4c8dff"), b: new THREE.Color("#9af5ff") },
-};
+// Motion per state is fixed; the theme only supplies the colours.
+function looksFor(theme: OrbTheme): Record<OrbState, Look> {
+  const c = (hex: string) => new THREE.Color(hex);
+  return {
+    idle: { amp: 0.1, freq: 1.3, speed: 0.5, a: c(theme.deep), b: c(theme.main) },
+    listening: { amp: 0.17, freq: 1.6, speed: 0.9, a: c(theme.main), b: c(theme.bright) },
+    thinking: { amp: 0.24, freq: 2.4, speed: 2.0, a: c(theme.thinkA), b: c(theme.thinkB) },
+    speaking: { amp: 0.14, freq: 1.8, speed: 1.1, a: c(theme.deep), b: c(theme.bright) },
+  };
+}
 
 const STATE_LABEL: Record<OrbState, string> = {
   idle: "Standing by",
@@ -101,21 +107,18 @@ void main() {
   float alpha = smoothstep(0.5, 0.0, d) * uOpacity;
   vec3 color = mix(uColorA, uColorB, smoothstep(-0.6, 0.8, vNoise));
   gl_FragColor = vec4(color, alpha);
+  // Without this the theme colours come out darker and redder than the UI accent.
+  #include <colorspace_fragment>
 }
 `;
 
-// Evenly spread points on a sphere (Fibonacci lattice).
-function sphereGeometry(count: number, radius: number) {
+type PointFn = (i: number, count: number) => [number, number, number];
+
+function pointCloud(count: number, point: PointFn) {
   const positions = new Float32Array(count * 3);
   const seeds = new Float32Array(count);
-  const golden = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < count; i++) {
-    const y = 1 - (i / (count - 1)) * 2;
-    const r = Math.sqrt(1 - y * y);
-    const theta = golden * i;
-    positions[i * 3] = Math.cos(theta) * r * radius;
-    positions[i * 3 + 1] = y * radius;
-    positions[i * 3 + 2] = Math.sin(theta) * r * radius;
+    positions.set(point(i, count), i * 3);
     seeds[i] = Math.random();
   }
   const geo = new THREE.BufferGeometry();
@@ -124,7 +127,58 @@ function sphereGeometry(count: number, radius: number) {
   return geo;
 }
 
-function makeLayer(count: number, radius: number, opacity: number) {
+// Evenly spread points on a sphere (Fibonacci lattice).
+function sphere(radius: number): PointFn {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  return (i, count) => {
+    const y = 1 - (i / (count - 1)) * 2;
+    const r = Math.sqrt(1 - y * y);
+    return [Math.cos(golden * i) * r * radius, y * radius, Math.sin(golden * i) * r * radius];
+  };
+}
+
+// A doughnut lying flat in the XZ plane.
+function torus(major: number, minor: number): PointFn {
+  return () => {
+    const u = Math.random() * Math.PI * 2;
+    const v = Math.random() * Math.PI * 2;
+    const r = major + minor * Math.cos(v);
+    return [r * Math.cos(u), minor * Math.sin(v), r * Math.sin(u)];
+  };
+}
+
+// A flat three-armed spiral, denser and thicker toward the middle.
+function spiral(radius: number): PointFn {
+  return (i) => {
+    const r = 0.1 + Math.sqrt(Math.random()) * (radius - 0.1);
+    const angle = ((i % 3) * Math.PI * 2) / 3 + r * 2.6 + (Math.random() - 0.5) * 0.7;
+    const y = (Math.random() - 0.5) * 0.16 * (radius + 0.2 - r);
+    return [Math.cos(angle) * r, y, Math.sin(angle) * r];
+  };
+}
+
+interface ShapeSpec {
+  core: [count: number, point: PointFn];
+  halo: [count: number, point: PointFn];
+  // How far the flat shapes lean toward the viewer.
+  tilt: number;
+  haloWobble: boolean;
+}
+
+// The faces are drawn by their own components, not as particles.
+type ParticleShape = Exclude<OrbShape, "face" | "face3d" | "robot">;
+const isParticleShape = (shape: OrbShape): shape is ParticleShape => shape in SHAPE_SPECS;
+
+// The 3D head pulls in the model loaders, so it is only fetched when chosen.
+const Face3D = lazy(() => import("./Face3D").then((m) => ({ default: m.Face3D })));
+
+const SHAPE_SPECS: Record<ParticleShape, ShapeSpec> = {
+  sphere: { core: [9000, sphere(1)], halo: [900, sphere(1.38)], tilt: 0, haloWobble: true },
+  ring: { core: [9000, torus(1, 0.26)], halo: [900, torus(1.36, 0.03)], tilt: 1.05, haloWobble: false },
+  galaxy: { core: [9000, spiral(1.3)], halo: [500, sphere(1.45)], tilt: 1.0, haloWobble: true },
+};
+
+function makeLayer([count, point]: [number, PointFn], opacity: number, look: Look) {
   const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,
@@ -133,23 +187,39 @@ function makeLayer(count: number, radius: number, opacity: number) {
     blending: THREE.AdditiveBlending,
     uniforms: {
       uTime: { value: 0 },
-      uAmp: { value: LOOKS.idle.amp },
-      uFreq: { value: LOOKS.idle.freq },
+      uAmp: { value: look.amp },
+      uFreq: { value: look.freq },
       uSize: { value: 8 },
       uOpacity: { value: opacity },
-      uColorA: { value: LOOKS.idle.a.clone() },
-      uColorB: { value: LOOKS.idle.b.clone() },
+      uColorA: { value: look.a.clone() },
+      uColorB: { value: look.b.clone() },
     },
   });
-  return new THREE.Points(sphereGeometry(count, radius), material);
+  return new THREE.Points(pointCloud(count, point), material);
 }
 
-export function Orb({ state, energy }: { state: OrbState; energy: RefObject<number> }) {
+export function Orb({
+  state,
+  energy,
+  shape,
+  theme,
+}: {
+  state: OrbState;
+  energy: RefObject<number>;
+  shape: OrbShape;
+  theme: OrbTheme;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  // Read every frame, so a new theme fades in without rebuilding the scene.
+  const looksRef = useRef(looksFor(theme));
+  useEffect(() => {
+    looksRef.current = looksFor(theme);
+  }, [theme]);
 
   useEffect(() => {
+    if (!isParticleShape(shape)) return;
     const host = hostRef.current!;
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -159,9 +229,14 @@ export function Orb({ state, energy }: { state: OrbState; energy: RefObject<numb
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 20);
     camera.position.z = 4.2;
 
-    const core = makeLayer(9000, 1, 0.85);
-    const halo = makeLayer(900, 1.38, 0.45);
-    scene.add(core, halo);
+    const spec = SHAPE_SPECS[shape];
+    const startLook = looksRef.current[stateRef.current];
+    const core = makeLayer(spec.core, 0.85, startLook);
+    const halo = makeLayer(spec.halo, 0.45, startLook);
+    const stage = new THREE.Group();
+    stage.rotation.x = spec.tilt;
+    stage.add(core, halo);
+    scene.add(stage);
     const layers = [core, halo];
 
     const resize = () => {
@@ -182,7 +257,7 @@ export function Orb({ state, energy }: { state: OrbState; energy: RefObject<numb
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let last = performance.now();
     let time = 0;
-    let speed = LOOKS.idle.speed;
+    let speed = startLook.speed;
     let frame = 0;
 
     const tick = () => {
@@ -190,7 +265,7 @@ export function Orb({ state, energy }: { state: OrbState; energy: RefObject<numb
       const now = performance.now();
       const dt = Math.min((now - last) / 1000, 0.1);
       last = now;
-      const look = LOOKS[stateRef.current];
+      const look = looksRef.current[stateRef.current];
       const ease = 1 - Math.exp(-dt * 4);
 
       energy.current *= Math.exp(-dt * 5);
@@ -210,7 +285,7 @@ export function Orb({ state, energy }: { state: OrbState; energy: RefObject<numb
       }
       core.rotation.y = time * 0.25;
       halo.rotation.y = -time * 0.15;
-      halo.rotation.x = time * 0.08;
+      if (spec.haloWobble) halo.rotation.x = time * 0.08;
 
       renderer.render(scene, camera);
     };
@@ -226,7 +301,7 @@ export function Orb({ state, energy }: { state: OrbState; energy: RefObject<numb
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [energy]);
+  }, [energy, shape]);
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -244,7 +319,15 @@ export function Orb({ state, energy }: { state: OrbState; energy: RefObject<numb
           <circle className="ring-ccw" cx="100" cy="100" r="85" strokeWidth="0.5" strokeDasharray="2 5" opacity="0.6" />
           <circle className="ring-cw" cx="100" cy="100" r="79" strokeWidth="2" strokeDasharray="34 214" opacity="0.5" />
         </svg>
-        <div ref={hostRef} className="absolute inset-0" />
+        {shape === "face" ? (
+          <Face state={state} energy={energy} />
+        ) : shape === "face3d" || shape === "robot" ? (
+          <Suspense fallback={null}>
+            <Face3D state={state} energy={energy} theme={theme} look={shape === "robot" ? "mesh" : "real"} />
+          </Suspense>
+        ) : (
+          <div ref={hostRef} className="absolute inset-0" />
+        )}
       </div>
       <div className="label pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap" role="status">
         {STATE_LABEL[state]}
