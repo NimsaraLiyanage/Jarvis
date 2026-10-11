@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, type RefObject } from "react";
 import * as THREE from "three";
 import { Face } from "./Face";
-import type { OrbShape, OrbTheme } from "./orbStyle";
+import { MODELS, type OrbShape, type OrbTheme } from "./orbStyle";
 import type { OrbState } from "./useJarvis";
 
 interface Look {
@@ -166,11 +166,13 @@ interface ShapeSpec {
 }
 
 // The faces are drawn by their own components, not as particles.
-type ParticleShape = Exclude<OrbShape, "face" | "face3d" | "robot">;
+type ParticleShape = "sphere" | "ring" | "galaxy";
 const isParticleShape = (shape: OrbShape): shape is ParticleShape => shape in SHAPE_SPECS;
 
 // The 3D head pulls in the model loaders, so it is only fetched when chosen.
 const Face3D = lazy(() => import("./Face3D").then((m) => ({ default: m.Face3D })));
+const FACE_LOOKS = { face3d: "real", robot: "mesh", hologram: "hologram" } as const;
+const Model3D = lazy(() => import("./Model3D").then((m) => ({ default: m.Model3D })));
 
 const SHAPE_SPECS: Record<ParticleShape, ShapeSpec> = {
   sphere: { core: [9000, sphere(1)], halo: [900, sphere(1.38)], tilt: 0, haloWobble: true },
@@ -303,6 +305,7 @@ export function Orb({
     };
   }, [energy, shape]);
 
+  const model = MODELS[shape];
   return (
     <div className="relative h-full w-full overflow-hidden">
       {/* Stage stops short of the bottom so the state label never sits on the orb. */}
@@ -321,9 +324,13 @@ export function Orb({
         </svg>
         {shape === "face" ? (
           <Face state={state} energy={energy} />
-        ) : shape === "face3d" || shape === "robot" ? (
+        ) : model ? (
           <Suspense fallback={null}>
-            <Face3D state={state} energy={energy} theme={theme} look={shape === "robot" ? "mesh" : "real"} />
+            <Model3D spec={model} state={state} energy={energy} theme={theme} />
+          </Suspense>
+        ) : shape === "face3d" || shape === "robot" || shape === "hologram" ? (
+          <Suspense fallback={null}>
+            <Face3D state={state} energy={energy} theme={theme} look={FACE_LOOKS[shape]} />
           </Suspense>
         ) : (
           <div ref={hostRef} className="absolute inset-0" />

@@ -105,6 +105,43 @@ function toMeshNodes(model: THREE.Object3D, nodeSize: number) {
   return { wire, nodes, eye };
 }
 
+const HOLOGRAM_GLSL = /* glsl */ `
+  {
+    // Keep the lit, textured face as brightness only, then redraw it in one glowing colour.
+    float holoLuma = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+    float holoEdge = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.2);
+    float holoLines = 0.5 + 0.5 * sin(gl_FragCoord.y * 1.5 - uHoloTime * 6.0);
+    float holoSweep = smoothstep(0.985, 1.0, sin(gl_FragCoord.y * 0.011 - uHoloTime * 1.3));
+    float holoFlicker = 0.95 + 0.05 * sin(uHoloTime * 37.0);
+    vec3 holo = uHoloColor * (0.16 + holoLuma * 1.25 + holoEdge * 1.5 + holoSweep * 0.5);
+    holo *= (0.76 + 0.24 * holoLines) * holoFlicker;
+    float holoAlpha = (0.5 + 0.5 * holoEdge) * (0.8 + 0.2 * holoLines);
+    gl_FragColor = vec4(holo, holoAlpha * gl_FragColor.a);
+  }
+`;
+
+/**
+ * Turns every material on the model into a hologram of itself. The original materials
+ * are patched rather than replaced, so skinning, face shapes and textures keep working.
+ */
+function toHologram(model: THREE.Object3D) {
+  const uniforms = { uHoloTime: { value: 0 }, uHoloColor: { value: new THREE.Color() } };
+  model.traverse((obj) => {
+    for (const material of [(obj as THREE.Mesh).material].flat()) {
+      if (!material) continue;
+      material.transparent = true;
+      material.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, uniforms);
+        shader.fragmentShader =
+          "uniform float uHoloTime;\nuniform vec3 uHoloColor;\n" +
+          shader.fragmentShader.replace("#include <tonemapping_fragment>", `${HOLOGRAM_GLSL}\n#include <tonemapping_fragment>`);
+      };
+      material.needsUpdate = true;
+    }
+  });
+  return { time: uniforms.uHoloTime, color: uniforms.uHoloColor.value };
+}
+
 async function loadModel(loader: GLTFLoader, urls: string[]) {
   for (const url of urls) {
     try {
@@ -128,8 +165,9 @@ export function Face3D({
   state: OrbState;
   energy: RefObject<number>;
   theme: OrbTheme;
-  // "real" shows the model as it is; "mesh" redraws the bundled head as a robot made of mesh nodes.
-  look: "real" | "mesh";
+  // "real" shows the model as it is, "hologram" as a glowing projection of itself, and
+  // "mesh" redraws the bundled head as a robot made of mesh nodes.
+  look: "real" | "mesh" | "hologram";
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
@@ -218,6 +256,8 @@ export function Face3D({
         frameDistance = (frameHeight / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) * (look === "mesh" ? 1.1 : 1.3);
         resize();
         const robot = look === "mesh" ? toMeshNodes(model, frameHeight * 0.016) : null;
+        const hologram = look === "hologram" ? toHologram(model) : null;
+        hologram?.color.set(themeRef.current.main);
 
         const shapes = makeShapeSetter(model);
         // Eye nodes are named differently by different tools.
@@ -309,6 +349,10 @@ export function Face3D({
 
           rimColor.set(s === "thinking" ? themeRef.current.thinkB : themeRef.current.main);
           for (const rim of rims) rim.color.lerp(rimColor, ease(4));
+          if (hologram) {
+            hologram.time.value = reducedMotion ? 0 : t;
+            hologram.color.lerp(rimColor, ease(4));
+          }
           if (robot) {
             robot.wire.color.lerp(rimColor, ease(4));
             rimColor.set(s === "thinking" ? themeRef.current.thinkB : themeRef.current.bright);

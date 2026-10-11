@@ -6,9 +6,29 @@ export const SHAPES = [
   { id: "galaxy", label: "Galaxy" },
   { id: "face", label: "Face" },
   { id: "face3d", label: "Face 3D" },
+  { id: "hologram", label: "Hologram" },
   { id: "robot", label: "Robot" },
+  { id: "dragon", label: "Dragon" },
+  { id: "astronaut", label: "Astronaut" },
+  { id: "animatronic", label: "Animatronic" },
+  { id: "toy", label: "Robot Toy" },
 ] as const;
 export type OrbShape = (typeof SHAPES)[number]["id"];
+
+export interface ModelSpec {
+  file: string;
+  // Radians to turn the model so it stands upright (pitch) and faces the viewer (yaw).
+  pitch?: number;
+  yaw?: number;
+}
+
+// Shapes that are a plain 3D model file in ui/public/models/custom/.
+export const MODELS: Partial<Record<OrbShape, ModelSpec>> = {
+  dragon: { file: "tiny_planet_friends_3d-defective-product-4083.glb" },
+  astronaut: { file: "wings_of_freedom-astronaut-3158.glb", yaw: Math.PI / 2 },
+  animatronic: { file: "animatronic robot 3d model.glb" },
+  toy: { file: "3d-robot-toy copy.glb" },
+};
 
 export interface OrbTheme {
   id: string;
