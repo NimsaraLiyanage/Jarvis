@@ -13,6 +13,13 @@ export interface ChatMessage {
   text: string;
 }
 
+// An action Jarvis wants to take that needs the user's Allow or Deny.
+export interface ConfirmRequest {
+  id: string;
+  title: string;
+  detail: string;
+}
+
 export interface SystemStats {
   cpu: number;
   ram: number;
@@ -27,6 +34,8 @@ type ServerEvent =
   | { type: "state"; value: OrbState }
   | { type: "delta"; text: string }
   | { type: "tool"; label: string }
+  | ({ type: "confirm_request" } & ConfirmRequest)
+  | { type: "confirm_closed"; id: string }
   | { type: "done" }
   | { type: "error"; message: string }
   | ({ type: "system" } & SystemStats);
@@ -38,6 +47,7 @@ export function useJarvis() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [voiceReady, setVoiceReady] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   const sockRef = useRef<WebSocket | null>(null);
   const nextId = useRef(1);
@@ -95,6 +105,12 @@ export function useJarvis() {
             setMessages((m) => [...m, { id, role: "error", text: ev.message }]);
             break;
           }
+          case "confirm_request":
+            setConfirm({ id: ev.id, title: ev.title, detail: ev.detail });
+            break;
+          case "confirm_closed":
+            setConfirm((c) => (c?.id === ev.id ? null : c));
+            break;
           case "done":
             streamingId.current = null;
             break;
@@ -104,6 +120,7 @@ export function useJarvis() {
       sock.onclose = () => {
         if (closed) return;
         streamingId.current = null;
+        setConfirm(null);
         setLink("offline");
         setCoreState("idle");
         timer = window.setTimeout(connect, RECONNECT_MS);
@@ -146,6 +163,12 @@ export function useJarvis() {
     setMessages((m) => [...m, { id, role, text }]);
   }, []);
 
+  const answerConfirm = useCallback((id: string, allow: boolean) => {
+    const sock = sockRef.current;
+    if (sock?.readyState === WebSocket.OPEN) sock.send(JSON.stringify({ type: "confirm_response", id, allow }));
+    setConfirm((c) => (c?.id === id ? null : c));
+  }, []);
+
   const reset = useCallback(() => {
     voiceTurn.current = null;
     setMessages([]);
@@ -160,6 +183,8 @@ export function useJarvis() {
     stats,
     model,
     voiceReady,
+    confirm,
+    answerConfirm,
     energy,
     send,
     reset,

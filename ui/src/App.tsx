@@ -3,7 +3,7 @@ import { ChatPanel } from "./ChatPanel";
 import { Orb } from "./Orb";
 import { SystemPanel } from "./SystemPanel";
 import { useJarvis, type LinkStatus, type OrbState } from "./useJarvis";
-import { useVoice } from "./useVoice";
+import { usePushToTalk, useVoice } from "./useVoice";
 
 const LINK_LABEL: Record<LinkStatus, string> = {
   connecting: "Connecting",
@@ -34,6 +34,7 @@ export function App() {
   const [typing, setTyping] = useState(false);
 
   const voice = useVoice({ onTranscript: jarvis.appendTranscript, onNote: jarvis.pushNote, energy: jarvis.energy });
+  usePushToTalk(voice.pressTalk, voice.releaseTalk, jarvis.link === "online" && jarvis.voiceReady);
 
   // A typed reply in progress wins; otherwise a live voice session drives the orb.
   const orbState: OrbState =
@@ -76,7 +77,10 @@ export function App() {
           link={jarvis.link}
           isStreaming={jarvis.isStreaming}
           voice={voice.status}
+          micOpen={voice.micOpen}
           onVoiceToggle={voice.status === "off" ? voice.start : voice.stop}
+          confirm={jarvis.confirm}
+          onConfirm={jarvis.answerConfirm}
           onSend={jarvis.send}
           onReset={jarvis.reset}
           onTypingChange={setTyping}

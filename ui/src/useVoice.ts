@@ -10,8 +10,14 @@ const DELEGATION_TIMEOUT_MS = 60_000;
 // Jarvis counts as speaking above this output level, and for a short hold after.
 const SPEAKING_LEVEL = 0.015;
 const SPEAKING_HOLD_MS = 350;
+// The mic stays open this long after Space is released so the last word isn't clipped.
+const TALK_RELEASE_TAIL_MS = 250;
+// A push-to-talk session is billed while open, so close it once nothing has happened for this long.
+const IDLE_CLOSE_MS = 90_000;
 
 export type VoiceStatus = "off" | "connecting" | "live";
+// "handsfree" keeps the mic open; "ptt" opens it only while the talk key is held.
+type VoiceMode = "handsfree" | "ptt";
 
 interface Options {
   onTranscript: (role: "user" | "jarvis", delta: string) => void;
@@ -75,20 +81,35 @@ async function runTool(call: FunctionCall): Promise<{ label: string; output: str
 
 export function useVoice({ onTranscript, onNote, energy }: Options) {
   const [status, setStatus] = useState<VoiceStatus>("off");
-  const [activity, setActivity] = useState<OrbState>("listening");
+  const [activity, setActivity] = useState<OrbState>("idle");
+  const [micOpen, setMicOpen] = useState(false);
 
   const live = useRef<Live | null>(null);
   // Guards against a second start while the first is still connecting.
   const starting = useRef(false);
   const delegating = useRef(false);
+  const handsFree = useRef(false);
+  const talkHeld = useRef(false);
+  const releaseTimer = useRef<number | undefined>(undefined);
   const callbacks = useRef({ onTranscript, onNote });
   callbacks.current = { onTranscript, onNote };
+
+  // Muting is done on the track itself, so a closed mic sends silence, not room audio.
+  const applyMic = useCallback(() => {
+    const open = handsFree.current || talkHeld.current;
+    live.current?.mic.getTracks().forEach((t) => (t.enabled = open));
+    setMicOpen(open && live.current !== null);
+  }, []);
 
   const teardown = useCallback(() => {
     const s = live.current;
     live.current = null;
     starting.current = false;
     delegating.current = false;
+    handsFree.current = false;
+    talkHeld.current = false;
+    window.clearTimeout(releaseTimer.current);
+    setMicOpen(false);
     if (s) {
       cancelAnimationFrame(s.frame);
       window.clearTimeout(s.delegationTimer);
@@ -101,9 +122,23 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
     setStatus("off");
   }, []);
 
-  const start = useCallback(async () => {
+  const closeSession = useCallback(
+    (s: Live) => {
+      if (s.dc.readyState === "open") {
+        // Ask for a clean close, but don't wait forever for the acknowledgement.
+        s.dc.send(JSON.stringify({ type: "session.close" }));
+        window.setTimeout(() => live.current === s && teardown(), CLOSE_TIMEOUT_MS);
+      } else {
+        teardown();
+      }
+    },
+    [teardown],
+  );
+
+  const begin = useCallback(async (mode: VoiceMode) => {
     if (starting.current || live.current) return;
     starting.current = true;
+    handsFree.current = mode === "handsfree";
     setStatus("connecting");
 
     let mic: MediaStream | undefined;
@@ -113,6 +148,9 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
       mic = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      // Closed from the first sample unless this session is hands-free or the key is already down.
+      const openNow = handsFree.current || talkHeld.current;
+      mic.getTracks().forEach((t) => (t.enabled = openNow));
       pc = new RTCPeerConnection();
       const audioCtx = (ctx = new AudioContext());
       const audio = new Audio();
@@ -222,25 +260,37 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
       if (!starting.current) throw new DOMException("cancelled", "AbortError");
       live.current = session;
       starting.current = false;
+      applyMic();
 
       const micBuf = new Float32Array(micAnalyser.fftSize);
       const outBuf = new Float32Array(outAnalyser.fftSize);
       let lastLoud = 0;
-      let current: OrbState = "listening";
+      let lastActive = performance.now();
+      let current: OrbState = "idle";
+      setActivity(current);
       const tick = () => {
         session.frame = requestAnimationFrame(tick);
         const out = rms(outAnalyser, outBuf);
         const now = performance.now();
         if (out > SPEAKING_LEVEL) lastLoud = now;
         const speaking = now - lastLoud < SPEAKING_HOLD_MS;
+        const open = handsFree.current || talkHeld.current;
 
-        const next: OrbState = delegating.current ? "thinking" : speaking ? "speaking" : "listening";
+        const next: OrbState = delegating.current ? "thinking" : speaking ? "speaking" : open ? "listening" : "idle";
         if (next !== current) {
           current = next;
           setActivity(next);
         }
-        const level = speaking ? out : rms(micAnalyser, micBuf);
+        const level = speaking ? out : open ? rms(micAnalyser, micBuf) : 0;
         energy.current = Math.max(energy.current, Math.min(1, level * 6));
+
+        if (next !== "idle") {
+          lastActive = now;
+        } else if (now - lastActive > IDLE_CLOSE_MS) {
+          lastActive = now;
+          callbacks.current.onNote("tool", "Voice session closed after 90 seconds idle");
+          closeSession(session);
+        }
       };
       tick();
     } catch (err) {
@@ -248,6 +298,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
       pc?.close();
       void ctx?.close();
       starting.current = false;
+      handsFree.current = false;
       setStatus("off");
       if (err instanceof DOMException && err.name === "AbortError") return;
       const message =
@@ -262,25 +313,70 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
                 : "Voice failed to start.";
       callbacks.current.onNote("error", message);
     }
-  }, [energy, teardown]);
+  }, [energy, teardown, applyMic, closeSession]);
+
+  const start = useCallback(() => void begin("handsfree"), [begin]);
 
   const stop = useCallback(() => {
     const s = live.current;
     if (!s) {
-      // Still connecting: let start() notice and clean up after itself.
+      // Still connecting: let begin() notice and clean up after itself.
       starting.current = false;
       return;
     }
-    if (s.dc.readyState === "open") {
-      // Ask for a clean close, but don't wait forever for the acknowledgement.
-      s.dc.send(JSON.stringify({ type: "session.close" }));
-      window.setTimeout(() => live.current === s && teardown(), CLOSE_TIMEOUT_MS);
-    } else {
-      teardown();
-    }
-  }, [teardown]);
+    closeSession(s);
+  }, [closeSession]);
+
+  // Push-to-talk: the first press also opens the session.
+  const pressTalk = useCallback(() => {
+    window.clearTimeout(releaseTimer.current);
+    talkHeld.current = true;
+    if (live.current) applyMic();
+    else void begin("ptt");
+  }, [applyMic, begin]);
+
+  const releaseTalk = useCallback(() => {
+    if (!talkHeld.current) return;
+    window.clearTimeout(releaseTimer.current);
+    releaseTimer.current = window.setTimeout(() => {
+      talkHeld.current = false;
+      applyMic();
+    }, TALK_RELEASE_TAIL_MS);
+  }, [applyMic]);
 
   useEffect(() => teardown, [teardown]);
 
-  return { status, activity, start, stop };
+  return { status, activity, micOpen, start, stop, pressTalk, releaseTalk };
+}
+
+function isTypingTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+}
+
+/** Hold Space anywhere outside a text field to talk; release to stop. */
+export function usePushToTalk(press: () => void, release: () => void, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || isTypingTarget(e.target)) return;
+      // Also stops Space from clicking a focused button or scrolling the page.
+      e.preventDefault();
+      if (!e.repeat) press();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      if (!isTypingTarget(e.target)) e.preventDefault();
+      release();
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    // Losing focus mid-press would otherwise leave the mic stuck open.
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", release);
+      release();
+    };
+  }, [press, release, enabled]);
 }

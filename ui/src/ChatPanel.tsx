@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import type { ChatMessage, LinkStatus } from "./useJarvis";
+import type { ChatMessage, ConfirmRequest, LinkStatus } from "./useJarvis";
 import type { VoiceStatus } from "./useVoice";
 
 const VOICE_LABEL: Record<VoiceStatus, string> = {
@@ -8,13 +8,26 @@ const VOICE_LABEL: Record<VoiceStatus, string> = {
   live: "End voice conversation",
 };
 
-function MicButton({ status, disabled, onClick }: { status: VoiceStatus; disabled: boolean; onClick: () => void }) {
+function MicButton({
+  status,
+  micOpen,
+  disabled,
+  onClick,
+}: {
+  status: VoiceStatus;
+  micOpen: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  // Filled while the mic is actually open; outlined while the session is live but muted.
   const look =
-    status === "live"
+    status === "live" && micOpen
       ? "border-accent bg-accent text-ink shadow-[0_0_16px_rgb(var(--accent)/0.6)]"
-      : status === "connecting"
-        ? "animate-pulse border-accent/60 text-accent"
-        : "border-white/15 text-dim hover:border-accent/60 hover:text-accent";
+      : status === "live"
+        ? "border-accent text-accent"
+        : status === "connecting"
+          ? "animate-pulse border-accent/60 text-accent"
+          : "border-white/15 text-dim hover:border-accent/60 hover:text-accent";
   return (
     <button
       type="button"
@@ -40,6 +53,34 @@ function greeting() {
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
+}
+
+function ConfirmCard({ request, onAnswer }: { request: ConfirmRequest; onAnswer: (id: string, allow: boolean) => void }) {
+  return (
+    <div className="border-t border-amber-400/40 bg-amber-400/10 px-4 py-3" role="alertdialog" aria-label={request.title}>
+      <p className="font-display text-sm font-semibold tracking-widest text-amber-300 uppercase">Permission needed</p>
+      <p className="mt-1 text-[15px] text-text">{request.title}</p>
+      <pre className="scroll-thin mt-2 max-h-32 overflow-y-auto border border-white/10 bg-black/40 p-2 font-mono text-xs whitespace-pre-wrap text-text">
+        {request.detail}
+      </pre>
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => onAnswer(request.id, true)}
+          className="h-9 flex-1 border border-amber-300 bg-amber-300 font-display text-sm font-bold tracking-widest text-ink uppercase transition-colors hover:bg-amber-200"
+        >
+          Allow
+        </button>
+        <button
+          type="button"
+          onClick={() => onAnswer(request.id, false)}
+          className="h-9 flex-1 border border-white/25 font-display text-sm font-bold tracking-widest text-text uppercase transition-colors hover:bg-white/10"
+        >
+          Deny
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function Message({ msg, streaming }: { msg: ChatMessage; streaming: boolean }) {
@@ -78,7 +119,10 @@ export function ChatPanel({
   link,
   isStreaming,
   voice,
+  micOpen,
   onVoiceToggle,
+  confirm,
+  onConfirm,
   onSend,
   onReset,
   onTypingChange,
@@ -87,7 +131,10 @@ export function ChatPanel({
   link: LinkStatus;
   isStreaming: boolean;
   voice: VoiceStatus;
+  micOpen: boolean;
   onVoiceToggle: () => void;
+  confirm: ConfirmRequest | null;
+  onConfirm: (id: string, allow: boolean) => void;
   onSend: (text: string) => void;
   onReset: () => void;
   onTypingChange: (typing: boolean) => void;
@@ -148,7 +195,7 @@ export function ChatPanel({
                 ? "Waiting for the core to come online."
                 : voice === "live"
                   ? "I'm listening. Go ahead."
-                  : "All systems ready. Type, or press the microphone to talk."}
+                  : "All systems ready. Type, or hold Space to talk."}
             </p>
             <div className="flex flex-col gap-2">
               {SUGGESTIONS.map((s) => (
@@ -169,8 +216,17 @@ export function ChatPanel({
         )}
       </div>
 
-      <form onSubmit={onSubmit} className="flex items-end gap-2 border-t border-white/5 p-3">
-        <MicButton status={voice} disabled={link !== "online"} onClick={onVoiceToggle} />
+      {confirm && <ConfirmCard request={confirm} onAnswer={onConfirm} />}
+
+      <p className="border-t border-white/5 px-4 pt-2 font-mono text-[11px] text-dim">
+        {voice === "live" && micOpen
+          ? "Mic open"
+          : voice === "live"
+            ? "Hold Space to talk · mic button ends the session"
+            : "Hold Space to talk · mic button for hands-free"}
+      </p>
+      <form onSubmit={onSubmit} className="flex items-end gap-2 p-3 pt-2">
+        <MicButton status={voice} micOpen={micOpen} disabled={link !== "online"} onClick={onVoiceToggle} />
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}

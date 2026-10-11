@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import config, tools, voice
+from . import approvals, config, tools, voice
 from .brain import BrainError, OpenAIBrain
 
 log = logging.getLogger("jarvis")
@@ -57,7 +57,7 @@ async def voice_session(offer: VoiceOffer, request: Request) -> dict[str, str]:
 async def run_tool(call: ToolCall, request: Request) -> dict[str, str]:
     """Runs a tool the voice backend asked for; the UI relays the call and the result."""
     require_own_ui(request)
-    result = await asyncio.to_thread(tools.run, call.name, call.arguments)
+    result = await tools.execute(call.name, call.arguments, approvals.request)
     return {"label": result.label, "output": result.output}
 
 
@@ -128,18 +128,28 @@ async def ws(sock: WebSocket) -> None:
     await sock.accept()
     session = Session(sock)
     await session.send({"type": "hello", "model": config.MODEL, "voice_ready": bool(config.OPENAI_API_KEY)})
+    approvals.register(session)
     stats_task = asyncio.create_task(session.push_stats())
+    # A reply runs as its own task so this loop stays free to receive the
+    # user's Allow/Deny answer while a tool is waiting on it.
+    reply_task: asyncio.Task[None] | None = None
     try:
         while True:
             msg = await sock.receive_json()
             kind = msg.get("type")
+            busy = reply_task is not None and not reply_task.done()
             if kind == "user_message":
                 text = str(msg.get("text", "")).strip()
-                if text:
-                    await session.handle_user_message(text)
-            elif kind == "reset":
+                if text and not busy:
+                    reply_task = asyncio.create_task(session.handle_user_message(text))
+            elif kind == "confirm_response":
+                approvals.resolve(str(msg.get("id", "")), msg.get("allow") is True)
+            elif kind == "reset" and not busy:
                 session.history.clear()
     except WebSocketDisconnect:
         pass
     finally:
+        approvals.unregister(session)
         stats_task.cancel()
+        if reply_task is not None:
+            reply_task.cancel()
