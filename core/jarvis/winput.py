@@ -4,10 +4,14 @@ import ctypes
 import subprocess
 import time
 from ctypes import wintypes
+from dataclasses import dataclass
 from pathlib import Path
+
+import psutil
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+dwmapi = ctypes.WinDLL("dwmapi")
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -17,6 +21,14 @@ VK_TAB = 0x09
 SW_RESTORE = 9
 WM_GETTEXT = 0x000D
 WM_GETTEXTLENGTH = 0x000E
+WM_CLOSE = 0x0010
+GW_OWNER = 4
+GWL_EXSTYLE = -20
+WS_EX_TOOLWINDOW = 0x00000080
+DWMWA_CLOAKED = 14
+# Desktop and taskbar: never app windows, and never something to close.
+SHELL_WINDOW_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
+CLOSE_WAIT_S = 2.0
 
 NOTEPAD_CLASS = "Notepad"
 LAUNCH_TIMEOUT_S = 6
@@ -63,7 +75,12 @@ user32.SendInput.restype = wintypes.UINT
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-user32.FindWindowExW.argtypes = (wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR)
+user32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
+dwmapi.DwmGetWindowAttribute.argtypes = (wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD)
+user32.GetWindow.argtypes = (wintypes.HWND, wintypes.UINT)
+user32.GetWindow.restype = wintypes.HWND
+user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t)
+user32.FindWindowExW.argtypes =(wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR)
 user32.FindWindowExW.restype = wintypes.HWND
 user32.SendMessageW.argtypes = (wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p)
 user32.SendMessageW.restype = ctypes.c_ssize_t
@@ -127,6 +144,64 @@ def _notepad_windows() -> list[int]:
 
     user32.EnumWindows(EnumWindowsProc(visit), 0)
     return found
+
+
+@dataclass(frozen=True)
+class Window:
+    hwnd: int
+    title: str
+    process: str  # executable name without ".exe", lower case
+
+
+def open_windows() -> list[Window]:
+    """The app windows a user would see on the taskbar, front-most first."""
+    found: list[Window] = []
+    title = ctypes.create_unicode_buffer(512)
+    class_name = ctypes.create_unicode_buffer(128)
+    cloaked = wintypes.DWORD()
+    pid = wintypes.DWORD()
+
+    def visit(hwnd: int, _lparam: int) -> bool:
+        if not user32.IsWindowVisible(hwnd) or user32.GetWindow(hwnd, GW_OWNER):
+            return True
+        if user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW:
+            return True
+        # Store apps keep hidden "cloaked" windows around; those are not really open.
+        dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked))
+        user32.GetWindowTextW(hwnd, title, len(title))
+        user32.GetClassNameW(hwnd, class_name, len(class_name))
+        if cloaked.value or not title.value or class_name.value in SHELL_WINDOW_CLASSES:
+            return True
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        try:
+            process = psutil.Process(pid.value).name().lower().removesuffix(".exe")
+        except psutil.Error:
+            return True
+        # explorer.exe also owns the desktop and taskbar; only its folder windows count.
+        if process == "explorer" and class_name.value != "CabinetWClass":
+            return True
+        found.append(Window(hwnd, title.value, process))
+        return True
+
+    user32.EnumWindows(EnumWindowsProc(visit), 0)
+    return found
+
+
+def close_windows(windows: list[Window]) -> list[Window]:
+    """Ask each window to close, the same as clicking its X. Returns the ones still open afterwards.
+
+    Nothing is force-closed: an app with unsaved work shows its usual save prompt and stays open.
+    """
+    for window in windows:
+        user32.PostMessageW(window.hwnd, WM_CLOSE, 0, 0)
+    deadline = time.monotonic() + CLOSE_WAIT_S
+    remaining = windows
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        remaining = [w for w in windows if user32.IsWindow(w.hwnd) and user32.IsWindowVisible(w.hwnd)]
+        if not remaining:
+            break
+    return remaining
 
 
 def read_notepad_windows(max_chars: int) -> list[tuple[str, str]]:

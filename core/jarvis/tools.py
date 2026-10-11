@@ -55,6 +55,19 @@ APPS = {
     "spotify": "spotify:",
 }
 
+# Program names (without .exe) behind the friendly app names, where they differ.
+APP_PROGRAMS = {
+    "calculator": ("calculatorapp", "calculator"),
+    "file_explorer": ("explorer",),
+    "task_manager": ("taskmgr",),
+    "paint": ("mspaint",),
+    "settings": ("systemsettings",),
+    "edge": ("msedge",),
+    "vscode": ("code",),
+}
+# The browser tab or desktop window showing Jarvis starts its title with this; it is never closed.
+JARVIS_WINDOW_TITLE = "JARVIS"
+
 
 @dataclass
 class ToolResult:
@@ -108,6 +121,20 @@ DEFINITIONS = [
         "Use when the user asks you to write, type or note something down in Notepad. "
         "The user is asked to allow it on screen first, so tell them to look for the prompt.",
         _one_string("text", "Exactly what to type. Use \\n for a new line."),
+    ),
+    _function(
+        "list_open_apps",
+        "List the app windows currently open on the user's computer, with each window's title and program name. "
+        "Use to find out what is open, for example before closing several apps.",
+        _no_args(),
+    ),
+    _function(
+        "close_app",
+        "Close the open windows of one app, the same as clicking their X button. Use when the user asks to close "
+        "or quit an app or its windows. Apps with unsaved work show their own save prompt and stay open until the "
+        "user answers it. The user is asked to allow it on screen first. To close several different apps, call "
+        "this once per app.",
+        _one_string("app", "The app to close: its name as the user said it, or a program name from list_open_apps, for example 'notepad' or 'chrome'."),
     ),
     _function(
         "read_notepad",
@@ -274,6 +301,48 @@ def _type_in_notepad(text: str) -> ToolResult:
     return ToolResult(f"Typed {len(text)} characters in Notepad", f"Typed the text into {where}.")
 
 
+def _is_jarvis(window: winput.Window) -> bool:
+    return window.title.upper().startswith(JARVIS_WINDOW_TITLE)
+
+
+def _windows_of(app: str) -> list[winput.Window]:
+    """Open windows belonging to the app the user named, never including Jarvis's own window."""
+    needle = app.lower().strip()
+    programs = {needle.replace(" ", ""), *APP_PROGRAMS.get(needle.replace(" ", "_"), ())}
+    return [
+        w
+        for w in winput.open_windows()
+        if not _is_jarvis(w) and (w.process in programs or (len(needle) >= 3 and needle in w.title.lower()))
+    ]
+
+
+def _list_open_apps() -> ToolResult:
+    windows = winput.open_windows()
+    if not windows:
+        return ToolResult("No app windows are open", "No app windows are open.")
+    lines = [f"- {w.process}: {w.title}" + (" (this is Jarvis itself; it cannot be closed)" if _is_jarvis(w) else "") for w in windows]
+    return ToolResult(f"Listed {len(windows)} open windows", "Open windows, front-most first (program: title):\n" + "\n".join(lines))
+
+
+def _check_close(app: str) -> ToolResult | None:
+    if not _windows_of(app):
+        return ToolResult(f"Nothing open matches “{app}”", f"No open window matches '{app}'. Use list_open_apps to see what is open.")
+    return None
+
+
+def _close_app(app: str) -> ToolResult:
+    windows = _windows_of(app)
+    if not windows:
+        return ToolResult(f"Nothing open matches “{app}”", f"No open window matches '{app}'.")
+    still_open = winput.close_windows(windows)
+    closed = len(windows) - len(still_open)
+    output = f"Closed {closed} of {len(windows)} windows."
+    if still_open:
+        titles = "; ".join(w.title for w in still_open)
+        output += f" Still open: {titles}. They are probably asking the user whether to save; tell the user to answer that prompt."
+    return ToolResult(f"Closed {closed} of {len(windows)} {app} windows", output)
+
+
 def _read_notepad() -> ToolResult:
     windows = winput.read_notepad_windows(NOTEPAD_READ_MAX_CHARS)
     if not windows:
@@ -356,6 +425,8 @@ _HANDLERS: dict[str, Callable[..., ToolResult]] = {
     "save_text_file": _save_text_file,
     "read_notepad": _read_notepad,
     "look_at_screen": _look_at_screen,
+    "list_open_apps": _list_open_apps,
+    "close_app": _close_app,
     "get_system_status": _get_system_status,
     "get_datetime": _get_datetime,
 }
@@ -368,11 +439,17 @@ _STRING_ARGS: dict[str, tuple[str, ...]] = {
     "type_in_notepad": ("text",),
     "save_text_file": ("folder", "filename", "text"),
     "look_at_screen": ("question",),
+    "close_app": ("app",),
 }
 # Tools that change something. Each maps its arguments to the (title, detail)
 # shown to the user, who must allow that exact action before it runs.
 _CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
     "type_in_notepad": lambda text: ("Type this into Notepad?", text),
+    # The prompt lists the exact windows, since a name can match more than the user expects.
+    "close_app": lambda app: (
+        f"Close these {app} windows?",
+        "\n".join(f"{w.process}: {w.title}" for w in _windows_of(app)),
+    ),
     # Everything visible goes to OpenAI, so the user decides each time.
     "look_at_screen": lambda question: (
         "Let Jarvis look at your screen?",
@@ -385,7 +462,7 @@ _CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
 }
 
 # Checks that run before the user is asked, so a bad request never reaches the prompt.
-_PRECHECK: dict[str, Callable[..., ToolResult | None]] = {"save_text_file": _check_save}
+_PRECHECK: dict[str, Callable[..., ToolResult | None]] = {"save_text_file": _check_save, "close_app": _check_close}
 
 Approver = Callable[[str, str], Awaitable[bool]]
 
