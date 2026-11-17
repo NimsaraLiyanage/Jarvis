@@ -70,6 +70,22 @@ Tools that change something ask first: an Allow/Deny card appears above the chat
 
 Reading the text in open Notepad windows needs no prompt. Neither does scrolling an app window, which turns the mouse wheel over the middle of it and sends no screenshot.
 
+## Hey Onyx and the hotkey
+
+Say "Hey Onyx" or press **Ctrl+Alt+O** from any app and Onyx comes forward, chimes and starts listening. A session started this way ends by itself after 15 seconds of quiet; Ctrl+Alt+O also ends it. Both are handled by the core (`core/jarvis/wake.py`), so they work in the desktop app and the web UI. If no window is open, the core opens the web UI.
+
+The wake word runs on openWakeWord, entirely on this computer, with no account or key; no audio leaves it until a voice session starts. The first start downloads its models (a few MB).
+
+openWakeWord has no ready-made "Hey Onyx" model, so until you add one it listens for **"Hey Jarvis"**. To switch to "Hey Onyx":
+
+1. Open openWakeWord's training notebook in Google Colab (linked from github.com/dscripka/openWakeWord under "Training New Models"), set the phrase to `hey onyx` and run it. It is free and takes about an hour.
+2. Save the resulting `.onnx` file as `%APPDATA%\Jarvis\hey-onyx.onnx`.
+3. Restart Onyx. The Modules list shows "Hey Onyx: LISTENING".
+
+If it wakes by mistake, or misses you, set `JARVIS_WAKE_THRESHOLD` in `.env` (default 0.5; higher is stricter).
+
+To keep Onyx always available like Siri, run `npm run app`. It builds the UI and starts the desktop app, which runs its own core and lives in the tray: closing the window hides it. Right-click the tray icon and tick **Start with Windows**. `npm run desktop` is the development version and stays as it was.
+
 ## Memory
 
 The conversation and the facts you ask Onyx to remember ("remember that my sister is Amaya") are kept in `%APPDATA%/Jarvis/memory.db`, so they survive a restart and are shared by the desktop app, the web UI and voice. The Memory button above the transcript lists saved facts and lets you forget them. Clear wipes the conversation but keeps the facts. See [IMPROVEMENTS.md](IMPROVEMENTS.md) for what is planned next.
@@ -77,8 +93,8 @@ The conversation and the facts you ask Onyx to remember ("remember that my siste
 ## Roadmap
 
 1. ~~Foundation, streaming chat, HUD~~
-2. Voice: ~~spoken conversation~~, wake word
+2. Voice: ~~spoken conversation, wake word~~
 3. Tools: ~~web search, open apps and sites, read pages, system status, confirmation prompt, typing in Notepad, clicking, typing, scrolling and dragging on screen~~, browser control, files
 4. ~~Memory: conversation history and facts about you~~
 5. Integrations: calendar, mail, reminders, morning brief
-6. Polish: tray, global hotkey, installer
+6. Polish: ~~tray, global hotkey~~, installer

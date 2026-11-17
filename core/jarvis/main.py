@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import approvals, config, devices, keystore, memory, tools, usage, voice, weather
+from . import approvals, config, devices, keystore, memory, tools, usage, voice, wake, weather
 from .brain import BrainError, OpenAIBrain
 
 log = logging.getLogger("jarvis")
@@ -19,9 +19,26 @@ log = logging.getLogger("jarvis")
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Background watchers for the HUD; the stats ticker only reads their latest result.
     watchers = [asyncio.create_task(devices.watch()), asyncio.create_task(weather.watch())]
+    wake.start(on_wake)
     yield
+    wake.stop()
     for task in watchers:
         task.cancel()
+
+
+# Every connected UI, so a wake reaches whichever one is open.
+sessions: set["Session"] = set()
+
+
+async def on_wake(source: wake.Source) -> None:
+    if not sessions:
+        wake.open_ui()
+        return
+    for session in list(sessions):
+        try:
+            await session.send({"type": "wake", "source": source})
+        except Exception:
+            sessions.discard(session)
 
 
 app = FastAPI(title="Onyx Core", lifespan=lifespan)
@@ -189,6 +206,7 @@ def system_stats() -> dict[str, Any]:
         "devices": devices.latest(),
         "weather": weather.latest(),
         "voice_ready": bool(config.OPENAI_API_KEY),
+        "wake": wake.status(),
         **key_status(),
     }
 
@@ -278,6 +296,7 @@ async def ws(sock: WebSocket) -> None:
     await session.send(history_event())
     await session.send(memory_event())
     approvals.register(session)
+    sessions.add(session)
     stats_task = asyncio.create_task(session.push_stats())
     # A reply runs as its own task so this loop stays free to receive the
     # user's Allow/Deny answer while a tool is waiting on it.
@@ -311,6 +330,14 @@ async def ws(sock: WebSocket) -> None:
         pass
     finally:
         approvals.unregister(session)
+        sessions.discard(session)
         stats_task.cancel()
         if reply_task is not None:
             reply_task.cancel()
+
+
+if config.SERVE_UI:
+    # Mounted last so the API routes above win; serves the built UI for the desktop app.
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=config.ROOT / "dist", html=True, check_dir=False), name="ui")

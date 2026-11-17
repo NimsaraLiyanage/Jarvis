@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BACKDROPS, type Backdrop } from "./BinaryBackdrop";
 import { SHAPES, THEMES, type OrbShape, type OrbTheme } from "./orbStyle";
 
 export function OrbSettings({
@@ -6,11 +7,15 @@ export function OrbSettings({
   theme,
   onShape,
   onTheme,
+  backdrop,
+  onBackdrop,
 }: {
   shape: OrbShape;
   theme: OrbTheme;
   onShape: (shape: OrbShape) => void;
   onTheme: (id: string) => void;
+  backdrop: Backdrop;
+  onBackdrop: (backdrop: Backdrop) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -46,9 +51,26 @@ export function OrbSettings({
 
       {open && (
         // The opaque wrapper positions the popover; .panel sets its own position and background.
-        <div role="dialog" aria-label="Orb appearance" className="absolute top-11 right-0 z-20 w-64 bg-ink-2">
-          <div className="panel p-4">
-          <h2 className="label mb-2">Shape</h2>
+        <div role="dialog" aria-label="Appearance" className="absolute top-11 right-0 z-20 w-64 bg-ink-2">
+          <div className="panel scroll-thin max-h-[calc(100dvh-7rem)] overflow-y-auto p-4">
+          <h2 className="label mb-2">Background</h2>
+          <div className="grid grid-cols-2 gap-1.5">
+            {BACKDROPS.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => onBackdrop(b.id)}
+                aria-pressed={backdrop === b.id}
+                className={`border py-1.5 text-sm transition-colors ${
+                  backdrop === b.id ? "border-accent bg-accent/15 text-accent" : "border-white/10 text-text hover:border-accent/50"
+                }`}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+
+          <h2 className="label mt-4 mb-2">Shape</h2>
           <div className="grid grid-cols-2 gap-1.5">
             {SHAPES.map((s) => (
               <button

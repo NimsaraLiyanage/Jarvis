@@ -8,10 +8,11 @@ Planned work for Onyx. Everything runs in the shared core, so each item works in
 - [x] Remember facts about the user — name, likes, projects ("remember this…"). Forget them on request or from the Memory list.
 - [x] Typed chat and voice share one conversation: voice turns are saved, typed chat sees them, and a new voice session starts with the saved facts and recent conversation.
 
-## 2. Voice improvements
+## 2. Voice improvements — done
 
-- [ ] Wake word ("Hey Onyx"): start talking without pressing a key (openWakeWord or Porcupine).
-- [ ] Global hotkey: open Onyx even when another app is in front.
+- [x] Wake word ("Hey Onyx"), like Siri: openWakeWord listens on this computer in the core (no account; "Hey Jarvis" until a trained hey-onyx.onnx is added), so it works with the window hidden in the tray, in the web UI, or with no window open (the core opens one). The session ends itself after 15 seconds of quiet.
+- [x] Global hotkey Ctrl+Alt+O: starts listening from any app, press again to stop.
+- [x] Desktop app lives in the tray, can start with Windows, and runs its own core (`npm run app`).
 
 ## 3. Files
 

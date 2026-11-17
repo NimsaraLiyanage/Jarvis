@@ -1,4 +1,4 @@
-import type { LinkStatus, SystemStats, Usage } from "./useJarvis";
+import type { LinkStatus, SystemStats, Usage, WakeStatus } from "./useJarvis";
 import type { VoiceStatus } from "./useVoice";
 
 function Meter({ label, value, detail }: { label: string; value: number | null; detail?: string }) {
@@ -19,17 +19,22 @@ function Meter({ label, value, detail }: { label: string; value: number | null; 
   );
 }
 
-function Module({ name, status, on }: { name: string; status: string; on: boolean }) {
+function Module({ name, status, on, note }: { name: string; status: string; on: boolean; note?: string }) {
   return (
-    <li className="flex items-center justify-between py-1.5">
-      <span className="flex items-center gap-2.5 text-sm text-text">
-        <span className={`h-1.5 w-1.5 rounded-full ${on ? "bg-accent shadow-[0_0_8px_rgb(var(--accent))]" : "bg-white/20"}`} />
-        {name}
-      </span>
-      <span className={`font-mono text-[11px] ${on ? "text-accent" : "text-dim"}`}>{status}</span>
+    <li className="py-1.5">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-2.5 text-sm text-text">
+          <span className={`h-1.5 w-1.5 rounded-full ${on ? "bg-accent shadow-[0_0_8px_rgb(var(--accent))]" : "bg-white/20"}`} />
+          {name}
+        </span>
+        <span className={`font-mono text-[11px] ${on ? "text-accent" : "text-dim"}`}>{status}</span>
+      </div>
+      {note && <p className="mt-1 pl-4 text-xs leading-snug break-words text-dim">{note}</p>}
     </li>
   );
 }
+
+const WAKE_LABEL: Record<WakeStatus["wake_word"], string> = { off: "OFF", on: "LISTENING", setup: "SET UP", error: "ERROR" };
 
 function formatTokens(n: number) {
   return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -64,6 +69,7 @@ export function SystemPanel({
   voice,
   voiceReady,
   usage,
+  wake,
 }: {
   stats: SystemStats | null;
   link: LinkStatus;
@@ -71,6 +77,7 @@ export function SystemPanel({
   voice: VoiceStatus;
   voiceReady: boolean;
   usage: Usage | null;
+  wake: WakeStatus | null;
 }) {
   const online = link === "online";
   const voiceLabel = !online ? "--" : !voiceReady ? "NO API KEY" : voice === "live" ? "LIVE" : voice === "connecting" ? "CONNECTING" : "READY";
@@ -102,7 +109,15 @@ export function SystemPanel({
           <Module name="Language model" status={online && model ? "READY" : "--"} on={online && !!model} />
           <Module name="Voice" status={voiceLabel} on={online && voiceReady} />
           <Module name="Tools" status={online ? "READY" : "--"} on={online} />
-          <Module name="Memory" status="NOT INSTALLED" on={false} />
+          <Module name="Memory" status={online ? "READY" : "--"} on={online} />
+          <Module
+            name={wake?.wake_phrase ?? "Wake word"}
+            status={online && wake ? WAKE_LABEL[wake.wake_word] : "--"}
+            on={online && wake?.wake_word === "on"}
+            // Explains a problem, or how to switch from the stand-in "Hey Jarvis" to "Hey Onyx".
+            note={online && wake && (wake.wake_word !== "on" || wake.wake_phrase !== "Hey Onyx") ? wake.wake_word_detail : undefined}
+          />
+          <Module name="Hotkey" status={online && wake?.hotkey ? wake.hotkey.toUpperCase() : "--"} on={online && !!wake?.hotkey} />
         </ul>
       </section>
 

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { BinaryBackdrop, useBackdrop } from "./BinaryBackdrop";
 import { ChatPanel } from "./ChatPanel";
 import { HudWidgets } from "./HudWidgets";
 import { KeySetup } from "./KeySetup";
@@ -33,6 +34,26 @@ function Clock() {
   );
 }
 
+// A short rising tone, so the user knows Onyx heard them before the session connects.
+function chime() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.setValueAtTime(660, ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(990, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+    osc.onended = () => void ctx.close();
+  } catch {
+    // No sound; listening still starts.
+  }
+}
+
 export function App() {
   const jarvis = useJarvis();
   const [typing, setTyping] = useState(false);
@@ -58,6 +79,32 @@ export function App() {
 
   const voice = useVoice({ onTranscript: jarvis.appendTranscript, onNote: jarvis.pushNote, energy: jarvis.energy });
   usePushToTalk(voice.pressTalk, voice.releaseTalk, jarvis.link === "online" && jarvis.voiceReady);
+  // "Hey Onyx" or the hotkey: bring the window forward and start listening.
+  // The hotkey also ends a running session, so one key starts and stops.
+  const { wakeSignal, link, voiceReady } = jarvis;
+  const { wake: wakeVoice, stop: stopVoice, status: voiceStatus } = voice;
+  const handled = useRef(0);
+  useEffect(() => {
+    if (!wakeSignal || wakeSignal.n === handled.current) return;
+    handled.current = wakeSignal.n;
+    if (voiceStatus !== "off") {
+      if (wakeSignal.source === "hotkey") stopVoice();
+      return;
+    }
+    window.onyxDesktop?.show();
+    if (!voiceReady) return;
+    chime();
+    wakeVoice();
+  }, [wakeSignal, voiceStatus, voiceReady, wakeVoice, stopVoice]);
+
+  // The core opens the web UI with #wake when "Hey Onyx" is heard and no window is open.
+  useEffect(() => {
+    if (link !== "online" || !voiceReady || window.location.hash !== "#wake") return;
+    history.replaceState(null, "", window.location.pathname);
+    chime();
+    wakeVoice();
+  }, [link, voiceReady, wakeVoice]);
+
   // Onyx's last spoken reply has no turn after it, so save it when the session ends.
   const { endVoiceTurn } = jarvis;
   useEffect(() => {
@@ -75,6 +122,7 @@ export function App() {
           : "idle";
 
   const orbStyle = useOrbStyle();
+  const { backdrop, setBackdrop } = useBackdrop();
   // The whole UI takes its accent from the orb's theme, switching while Onyx is thinking.
   const accent = orbState === "thinking" ? orbStyle.theme.thinkAccent : orbStyle.theme.accent;
   // Set on the root element: the accent colour utilities are resolved there, not on this component.
@@ -83,7 +131,8 @@ export function App() {
   }, [accent]);
 
   return (
-    <div data-orb={orbState} className="backdrop flex h-dvh flex-col">
+    <div data-orb={orbState} className={`backdrop isolate flex h-dvh flex-col ${backdrop === "binary" ? "backdrop-binary" : ""}`}>
+      {backdrop === "binary" && <BinaryBackdrop />}
       <header className="flex items-center justify-between px-4 pt-3 sm:px-6">
         <div className="flex items-baseline gap-3">
           <h1 className="font-display text-2xl font-bold tracking-[0.3em] text-accent transition-colors duration-500">
@@ -109,6 +158,8 @@ export function App() {
             theme={orbStyle.theme}
             onShape={orbStyle.setShape}
             onTheme={orbStyle.setTheme}
+            backdrop={backdrop}
+            onBackdrop={setBackdrop}
           />
           <Clock />
         </div>
@@ -122,6 +173,7 @@ export function App() {
           voice={voice.status}
           voiceReady={jarvis.voiceReady}
           usage={jarvis.usage}
+          wake={jarvis.wakeStatus}
         />
         <Orb state={orbState} energy={jarvis.energy} shape={orbStyle.shape} theme={orbStyle.theme} />
         <ChatPanel

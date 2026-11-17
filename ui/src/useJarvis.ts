@@ -72,6 +72,21 @@ export interface Fact {
   text: string;
 }
 
+export interface WakeStatus {
+  // "setup" or "error" means it is not listening; detail says why.
+  wake_word: "off" | "on" | "setup" | "error";
+  wake_word_detail: string;
+  // "Hey Onyx", or "Hey Jarvis" until a trained Hey Onyx model is added.
+  wake_phrase: string;
+  hotkey: string | null;
+}
+
+// A request to start listening from "Hey Onyx" or the global hotkey; n changes on every one.
+export interface WakeSignal {
+  n: number;
+  source: "wake_word" | "hotkey";
+}
+
 export interface KeyStatus {
   key_set: boolean;
   key_hint: string | null;
@@ -82,6 +97,7 @@ type ServerEvent =
   | { type: "hello"; model: string; voice_ready: boolean }
   | { type: "history"; messages: { role: "user" | "assistant"; text: string }[] }
   | { type: "memory"; facts: Fact[] }
+  | { type: "wake"; source: WakeSignal["source"] }
   | { type: "state"; value: OrbState }
   | { type: "delta"; text: string }
   | { type: "tool"; label: string }
@@ -89,7 +105,7 @@ type ServerEvent =
   | { type: "confirm_closed"; id: string }
   | { type: "done" }
   | { type: "error"; message: string }
-  | ({ type: "system"; usage: Usage; voice_ready: boolean; devices: Device[]; weather: Weather | null } & SystemStats & KeyStatus);
+  | ({ type: "system"; usage: Usage; voice_ready: boolean; devices: Device[]; weather: Weather | null; wake: WakeStatus } & SystemStats & KeyStatus);
 
 export function useJarvis() {
   const [link, setLink] = useState<LinkStatus>("connecting");
@@ -104,6 +120,8 @@ export function useJarvis() {
   const [weather, setWeather] = useState<Weather | null>(null);
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
   const [facts, setFacts] = useState<Fact[]>([]);
+  const [wakeStatus, setWakeStatus] = useState<WakeStatus | null>(null);
+  const [wakeSignal, setWakeSignal] = useState<WakeSignal | null>(null);
 
   const sockRef = useRef<WebSocket | null>(null);
   const nextId = useRef(1);
@@ -143,6 +161,9 @@ export function useJarvis() {
           case "memory":
             setFacts(ev.facts);
             break;
+          case "wake":
+            setWakeSignal((w) => ({ n: (w?.n ?? 0) + 1, source: ev.source }));
+            break;
           case "state":
             setCoreState(ev.value);
             break;
@@ -151,6 +172,11 @@ export function useJarvis() {
             setUsage(ev.usage);
             setDevices(ev.devices);
             setWeather(ev.weather);
+            setWakeStatus((w) =>
+              w?.wake_word === ev.wake.wake_word && w.wake_word_detail === ev.wake.wake_word_detail && w.wake_phrase === ev.wake.wake_phrase && w.hotkey === ev.wake.hotkey
+                ? w
+                : ev.wake,
+            );
             setVoiceReady(ev.voice_ready);
             setKeyStatus((k) =>
               k?.key_set === ev.key_set && k.key_hint === ev.key_hint && k.key_from_env === ev.key_from_env
@@ -285,6 +311,8 @@ export function useJarvis() {
     setKeyStatus,
     facts,
     forget,
+    wakeStatus,
+    wakeSignal,
     confirm,
     answerConfirm,
     energy,

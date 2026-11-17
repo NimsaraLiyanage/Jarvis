@@ -14,10 +14,15 @@ const SPEAKING_HOLD_MS = 350;
 const TALK_RELEASE_TAIL_MS = 250;
 // A push-to-talk session is billed while open, so close it once nothing has happened for this long.
 const IDLE_CLOSE_MS = 90_000;
+// A session opened by "Hey Onyx" or the hotkey ends like Siri: once nobody has spoken for this long.
+const WAKE_QUIET_CLOSE_MS = 15_000;
+// Mic level that counts as the user talking, after the browser's noise suppression.
+const MIC_VOICE_LEVEL = 0.02;
 
 export type VoiceStatus = "off" | "connecting" | "live";
-// "handsfree" keeps the mic open; "ptt" opens it only while the talk key is held.
-type VoiceMode = "handsfree" | "ptt";
+// "handsfree" keeps the mic open; "ptt" opens it only while the talk key is held;
+// "wake" is hands-free but closes itself after a quiet spell.
+type VoiceMode = "handsfree" | "ptt" | "wake";
 
 interface Options {
   onTranscript: (role: "user" | "jarvis", delta: string) => void;
@@ -150,7 +155,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
   const begin = useCallback(async (mode: VoiceMode) => {
     if (starting.current || live.current) return;
     starting.current = true;
-    handsFree.current = mode === "handsfree";
+    handsFree.current = mode !== "ptt";
     setStatus("connecting");
 
     let mic: MediaStream | undefined;
@@ -279,6 +284,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
       const outBuf = new Float32Array(outAnalyser.fftSize);
       let lastLoud = 0;
       let lastActive = performance.now();
+      const quietClose = mode === "wake";
       let current: OrbState = "idle";
       setActivity(current);
       const tick = () => {
@@ -294,14 +300,17 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
           current = next;
           setActivity(next);
         }
-        const level = speaking ? out : open ? rms(micAnalyser, micBuf) : 0;
+        const micLevel = open ? rms(micAnalyser, micBuf) : 0;
+        const level = speaking ? out : micLevel;
         energy.current = Math.max(energy.current, Math.min(1, level * 6));
 
-        if (next !== "idle") {
+        // A wake session counts only real talk as activity, since its mic is always open.
+        const active = quietClose ? speaking || delegating.current || micLevel > MIC_VOICE_LEVEL : next !== "idle";
+        if (active) {
           lastActive = now;
-        } else if (now - lastActive > IDLE_CLOSE_MS) {
+        } else if (now - lastActive > (quietClose ? WAKE_QUIET_CLOSE_MS : IDLE_CLOSE_MS)) {
           lastActive = now;
-          callbacks.current.onNote("tool", "Voice session closed after 90 seconds idle");
+          if (!quietClose) callbacks.current.onNote("tool", "Voice session closed after 90 seconds idle");
           closeSession(session);
         }
       };
@@ -329,6 +338,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
   }, [energy, teardown, applyMic, closeSession]);
 
   const start = useCallback(() => void begin("handsfree"), [begin]);
+  const wake = useCallback(() => void begin("wake"), [begin]);
 
   const stop = useCallback(() => {
     const s = live.current;
@@ -359,7 +369,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
 
   useEffect(() => teardown, [teardown]);
 
-  return { status, activity, micOpen, start, stop, pressTalk, releaseTalk };
+  return { status, activity, micOpen, start, wake, stop, pressTalk, releaseTalk };
 }
 
 function isTypingTarget(target: EventTarget | null) {

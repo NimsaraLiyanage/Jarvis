@@ -9,8 +9,9 @@
     "core": "node desktop/start-core.cjs",
     "ui": "vite",
     "web": "concurrently -k -n core,ui -c cyan,magenta \"npm run core\" \"npm run ui\"",
-    "desktop": "concurrently -k -n core,ui,app -c cyan,magenta,yellow \"npm run core\" \"npm run ui\" \"wait-on http://localhost:5173 && node desktop/launch.cjs\"",
-    "build": "tsc --noEmit && vite build"
+    "desktop": "concurrently -k -n core,ui,app -c cyan,magenta,yellow \"npm run core\" \"npm run ui\" \"wait-on http://localhost:5173 && node desktop/launch.cjs --dev\"",
+    "build": "tsc --noEmit && vite build",
+    "app": "npm run build && node desktop/launch.cjs"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",

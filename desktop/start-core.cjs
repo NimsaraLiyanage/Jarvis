@@ -29,8 +29,10 @@ for (const pid of pidsListeningOn(PORT)) {
 }
 
 const python = path.join(root, "core", ".venv", "Scripts", "python.exe");
-const args = ["-m", "uvicorn", "jarvis.main:app", "--app-dir", "core", "--host", "127.0.0.1", "--port", String(PORT), "--reload", "--reload-dir", "core/jarvis"];
-const child = spawn(python, args, { cwd: root, stdio: "inherit" });
+const args = ["-m", "uvicorn", "jarvis.main:app", "--app-dir", "core", "--host", "127.0.0.1", "--port", String(PORT)];
+// Reload on code changes while developing; the desktop app's own core (JARVIS_SERVE_UI) runs as is.
+if (process.env.JARVIS_SERVE_UI !== "1") args.push("--reload", "--reload-dir", "core/jarvis");
+const child = spawn(python, args, { cwd: root, stdio: "inherit", windowsHide: true });
 child.on("exit", (code) => process.exit(code ?? 0));
 
 // Take the whole process tree down with us; the reloader's worker otherwise survives.

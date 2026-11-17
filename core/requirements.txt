@@ -5,3 +5,5 @@ uvicorn[standard]
 python-dotenv
 psutil
 pillow
+openwakeword
+pvrecorder

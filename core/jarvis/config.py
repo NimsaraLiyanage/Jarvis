@@ -19,13 +19,18 @@ VOICE_MODEL = os.getenv("JARVIS_VOICE_MODEL", "gpt-live-1")
 VOICE_NAME = os.getenv("JARVIS_VOICE", "marin")
 VOICE_BACKEND_MODEL = os.getenv("JARVIS_VOICE_BACKEND_MODEL", "gpt-6-luna")
 
+# Where the UI is served: the Vite dev server, or the core itself when the
+# desktop app runs the built UI (JARVIS_SERVE_UI=1).
+SERVE_UI = os.getenv("JARVIS_SERVE_UI", "") == "1"
+UI_URL = os.getenv("JARVIS_UI_URL", "http://127.0.0.1:8765" if SERVE_UI else "http://localhost:5173")
+
 # Browser origins allowed to open the WebSocket. Anything else is rejected so a
 # random web page can't talk to the core running on this machine.
 ALLOWED_ORIGINS = {
     o.strip()
     for o in os.getenv(
         "JARVIS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
+        "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8765",
     ).split(",")
     if o.strip()
 }
