@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import type { ChatMessage, ConfirmRequest, LinkStatus } from "./useJarvis";
+import type { ChatMessage, ConfirmRequest, Fact, LinkStatus } from "./useJarvis";
 import type { VoiceStatus } from "./useVoice";
 
 const VOICE_LABEL: Record<VoiceStatus, string> = {
@@ -83,6 +83,33 @@ function ConfirmCard({ request, onAnswer }: { request: ConfirmRequest; onAnswer:
   );
 }
 
+function MemoryList({ facts, onForget }: { facts: Fact[]; onForget: (id: number) => void }) {
+  if (facts.length === 0) {
+    return (
+      <p className="m-auto max-w-xs text-center text-sm text-dim">
+        Nothing saved yet. Say or type “remember that…” and Jarvis keeps it across restarts, in chat and voice.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-2">
+      {facts.map((f) => (
+        <li key={f.id} className="flex items-start gap-3 border border-white/10 bg-white/5 px-3 py-2">
+          <span className="flex-1 text-sm leading-relaxed">{f.text}</span>
+          <button
+            type="button"
+            onClick={() => onForget(f.id)}
+            aria-label={`Forget: ${f.text}`}
+            className="shrink-0 font-display text-xs font-semibold tracking-widest text-dim uppercase transition-colors hover:text-danger"
+          >
+            Forget
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Message({ msg, streaming }: { msg: ChatMessage; streaming: boolean }) {
   if (msg.role === "user") {
     return (
@@ -125,6 +152,8 @@ export function ChatPanel({
   onConfirm,
   onSend,
   onReset,
+  facts,
+  onForget,
   onTypingChange,
   collapsed,
   onToggleCollapsed,
@@ -140,6 +169,8 @@ export function ChatPanel({
   onConfirm: (id: string, allow: boolean) => void;
   onSend: (text: string) => void;
   onReset: () => void;
+  facts: Fact[];
+  onForget: (id: number) => void;
   onTypingChange: (typing: boolean) => void;
   // Collapsed hides the messages and shows the HUD widgets in their place; the input stays.
   collapsed: boolean;
@@ -154,6 +185,7 @@ export function ChatPanel({
   const unread = collapsed ? messages.length - seen : 0;
 
   const [draft, setDraft] = useState("");
+  const [showMemory, setShowMemory] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const canSend = link === "online" && !isStreaming;
 
@@ -210,20 +242,35 @@ export function ChatPanel({
             Show transcript
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={onReset}
-            disabled={messages.length === 0 || isStreaming}
-            className="font-display text-xs font-semibold tracking-widest text-dim uppercase transition-colors hover:text-accent disabled:opacity-30 disabled:hover:text-dim"
-          >
-            Clear
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setShowMemory((m) => !m)}
+              aria-pressed={showMemory}
+              className={`font-display text-xs font-semibold tracking-widest uppercase transition-colors hover:text-accent ${showMemory ? "text-accent" : "text-dim"}`}
+            >
+              Memory{facts.length > 0 && ` (${facts.length})`}
+            </button>
+            {!showMemory && (
+              <button
+                type="button"
+                onClick={onReset}
+                disabled={messages.length === 0 || isStreaming}
+                title="Clears the saved conversation. Remembered facts stay."
+                className="font-display text-xs font-semibold tracking-widest text-dim uppercase transition-colors hover:text-accent disabled:opacity-30 disabled:hover:text-dim"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         )}
       </header>
 
       <div ref={listRef} className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
         {collapsed ? (
           widgets
+        ) : showMemory ? (
+          <MemoryList facts={facts} onForget={onForget} />
         ) : messages.length === 0 ? (
           <div className="m-auto flex max-w-xs flex-col items-center gap-4 text-center">
             <p className="font-display text-2xl font-semibold tracking-wide">{greeting()}.</p>

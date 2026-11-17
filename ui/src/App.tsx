@@ -58,6 +58,11 @@ export function App() {
 
   const voice = useVoice({ onTranscript: jarvis.appendTranscript, onNote: jarvis.pushNote, energy: jarvis.energy });
   usePushToTalk(voice.pressTalk, voice.releaseTalk, jarvis.link === "online" && jarvis.voiceReady);
+  // Jarvis's last spoken reply has no turn after it, so save it when the session ends.
+  const { endVoiceTurn } = jarvis;
+  useEffect(() => {
+    if (voice.status === "off") endVoiceTurn();
+  }, [voice.status, endVoiceTurn]);
 
   // A typed reply in progress wins; otherwise a live voice session drives the orb.
   const orbState: OrbState =
@@ -130,6 +135,8 @@ export function App() {
           onConfirm={jarvis.answerConfirm}
           onSend={jarvis.send}
           onReset={jarvis.reset}
+          facts={jarvis.facts}
+          onForget={jarvis.forget}
           onTypingChange={setTyping}
           collapsed={collapsed}
           onToggleCollapsed={toggleCollapsed}

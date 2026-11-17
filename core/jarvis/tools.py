@@ -22,7 +22,7 @@ from urllib.parse import quote_plus, urljoin, urlparse
 import httpx2 as httpx
 import psutil
 
-from . import vision, winput
+from . import memory, vision, winput
 
 TYPE_MAX_CHARS = 4000
 NOTEPAD_READ_MAX_CHARS = 8000
@@ -254,6 +254,18 @@ DEFINITIONS = [
         "get_datetime",
         "Read the current local date and time on the user's computer.",
         _no_args(),
+    ),
+    _function(
+        "remember",
+        "Save a fact about the user so you still know it in later sessions, typed or spoken: their name, what they like, "
+        "their projects, people in their life. Use when the user asks you to remember something, or tells you a lasting "
+        "fact about themselves they would expect you to keep. Write it as a short third-person sentence.",
+        _one_string("fact", "The fact, for example 'Their sister is called Amaya.'"),
+    ),
+    _function(
+        "forget_memory",
+        "Delete one saved fact. Use when the user asks you to forget something you remembered.",
+        _one_string("fact_id", "The id of the fact, the number in brackets in the remembered list."),
     ),
 ]
 
@@ -604,6 +616,26 @@ def _get_system_status() -> ToolResult:
     return ToolResult("Checked system status", json.dumps(status))
 
 
+def _remember(fact: str) -> ToolResult:
+    try:
+        _, new = memory.add_fact(fact)
+    except ValueError as e:
+        return ToolResult("Memory is full", f"Error: {e}")
+    if not new:
+        return ToolResult("Already remembered", "That fact was already saved.")
+    return ToolResult(f"Remembered: {fact}", "Saved. It will be in your instructions from now on.")
+
+
+def _forget_memory(fact_id: str) -> ToolResult:
+    try:
+        text = memory.forget_fact(int(fact_id.strip("[] ")))
+    except ValueError:
+        text = None
+    if text is None:
+        return ToolResult("Nothing to forget", f"Error: there is no saved fact with id {fact_id}.")
+    return ToolResult(f"Forgot: {text}", "Deleted.")
+
+
 def _get_datetime() -> ToolResult:
     return ToolResult("Checked the time", datetime.now().astimezone().strftime("%A, %d %B %Y, %H:%M %Z"))
 
@@ -626,6 +658,8 @@ _HANDLERS: dict[str, Callable[..., ToolResult]] = {
     "close_app": _close_app,
     "get_system_status": _get_system_status,
     "get_datetime": _get_datetime,
+    "remember": _remember,
+    "forget_memory": _forget_memory,
 }
 # The string arguments each tool takes, in the order its handler expects them.
 _STRING_ARGS: dict[str, tuple[str, ...]] = {
@@ -642,6 +676,8 @@ _STRING_ARGS: dict[str, tuple[str, ...]] = {
     "drag_on_screen": ("app", "item", "destination"),
     "scroll_in_app": ("app", "direction", "amount"),
     "close_app": ("app",),
+    "remember": ("fact",),
+    "forget_memory": ("fact_id",),
 }
 # The true/false arguments each tool takes, passed to its handler after the strings.
 _FLAG_ARGS: dict[str, tuple[str, ...]] = {"type_on_screen": ("press_enter",)}

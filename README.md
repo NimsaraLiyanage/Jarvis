@@ -42,7 +42,7 @@ Put your OpenAI API key in `.env`; the one key runs typed chat and voice. Never 
 
 Hold Space to talk and release it to close the mic (click outside the chat box first, since Space types there). The first press opens the session; it closes by itself after 90 seconds with nothing happening. The microphone button starts a hands-free session with the mic always open, and ends whichever session is running. Voice runs on OpenAI GPT-Live over WebRTC: the browser sends its offer to the core (`core/jarvis/voice.py`), which opens the session with your key, so the key never reaches the UI. GPT-Live holds the conversation and hands questions needing web search or deeper reasoning to the backend model.
 
-GPT-Live is billed per second while a session is open, so end the session when you are done. Voice and typed chat use different models and do not share conversation history yet.
+GPT-Live is billed per second while a session is open, so end the session when you are done. Voice and typed chat use different models but share one saved conversation: what you say is visible to typed chat, and a new voice session starts with your saved facts and the recent conversation.
 
 ## Orb appearance
 
@@ -70,11 +70,15 @@ Tools that change something ask first: an Allow/Deny card appears above the chat
 
 Reading the text in open Notepad windows needs no prompt. Neither does scrolling an app window, which turns the mouse wheel over the middle of it and sends no screenshot.
 
+## Memory
+
+The conversation and the facts you ask Jarvis to remember ("remember that my sister is Amaya") are kept in `%APPDATA%/Jarvis/memory.db`, so they survive a restart and are shared by the desktop app, the web UI and voice. The Memory button above the transcript lists saved facts and lets you forget them. Clear wipes the conversation but keeps the facts. See [IMPROVEMENTS.md](IMPROVEMENTS.md) for what is planned next.
+
 ## Roadmap
 
 1. ~~Foundation, streaming chat, HUD~~
 2. Voice: ~~spoken conversation~~, wake word
 3. Tools: ~~web search, open apps and sites, read pages, system status, confirmation prompt, typing in Notepad, clicking, typing, scrolling and dragging on screen~~, browser control, files
-4. Memory: conversation history and facts about you
+4. ~~Memory: conversation history and facts about you~~
 5. Integrations: calendar, mail, reminders, morning brief
 6. Polish: tray, global hotkey, installer

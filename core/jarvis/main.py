@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import approvals, config, devices, keystore, tools, usage, voice, weather
+from . import approvals, config, devices, keystore, memory, tools, usage, voice, weather
 from .brain import BrainError, OpenAIBrain
 
 log = logging.getLogger("jarvis")
@@ -193,29 +193,55 @@ def system_stats() -> dict[str, Any]:
     }
 
 
+def history_event() -> dict[str, Any]:
+    return {
+        "type": "history",
+        "messages": [{"role": m["role"], "text": m["content"]} for m in memory.recent_messages(memory.HISTORY_MESSAGES)],
+    }
+
+
+def memory_event() -> dict[str, Any]:
+    return {"type": "memory", "facts": memory.facts()}
+
+
 class Session:
-    """One connected UI. Serialises sends so the stats ticker and a reply can't interleave."""
+    """One connected UI. Serialises sends so the stats ticker and a reply can't interleave.
+
+    The conversation itself lives in memory.db, shared with every other window and with voice.
+    """
 
     def __init__(self, sock: WebSocket) -> None:
         self.sock = sock
-        self.history: list[dict[str, Any]] = []
         self._send_lock = asyncio.Lock()
+        self._facts_version = memory.facts_version
+        self._cleared_version = memory.cleared_version
 
     async def send(self, payload: dict[str, Any]) -> None:
         async with self._send_lock:
             await self.sock.send_json(payload)
 
+    def mark_cleared(self) -> None:
+        self._cleared_version = memory.cleared_version
+
     async def push_stats(self) -> None:
         while True:
             await self.send(system_stats())
+            # Facts saved by a tool, or a Clear pressed in another window, reach this window here.
+            if self._facts_version != memory.facts_version:
+                self._facts_version = memory.facts_version
+                await self.send(memory_event())
+            if self._cleared_version != memory.cleared_version:
+                self._cleared_version = memory.cleared_version
+                await self.send(history_event())
             await asyncio.sleep(STATS_INTERVAL_S)
 
     async def handle_user_message(self, text: str) -> None:
-        self.history.append({"role": "user", "content": text})
+        message_id = memory.add_message("user", text, "chat")
+        history = memory.recent_messages()
         await self.send({"type": "state", "value": "thinking"})
         speaking = False
         try:
-            async for kind, value in brain.stream_reply(self.history):
+            async for kind, value in brain.stream_reply(history):
                 if kind == "tool":
                     # Back to "thinking" while the model reads the tool result.
                     speaking = False
@@ -226,13 +252,16 @@ class Session:
                     speaking = True
                     await self.send({"type": "state", "value": "speaking"})
                 await self.send({"type": "delta", "text": value})
+            reply = history[-1]["content"] if history[-1]["role"] == "assistant" else ""
+            if reply:
+                memory.add_message("assistant", reply, "chat")
         except BrainError as e:
             # Drop the unanswered user turn so the next request starts clean.
-            self.history.pop()
+            memory.delete_message(message_id)
             await self.send({"type": "error", "message": str(e)})
         except Exception:
             log.exception("unexpected failure while replying")
-            self.history.pop()
+            memory.delete_message(message_id)
             await self.send({"type": "error", "message": "Something went wrong inside the core. Check its log."})
         await self.send({"type": "done"})
         await self.send({"type": "state", "value": "idle"})
@@ -246,6 +275,8 @@ async def ws(sock: WebSocket) -> None:
     await sock.accept()
     session = Session(sock)
     await session.send({"type": "hello", "model": config.MODEL, "voice_ready": bool(config.OPENAI_API_KEY)})
+    await session.send(history_event())
+    await session.send(memory_event())
     approvals.register(session)
     stats_task = asyncio.create_task(session.push_stats())
     # A reply runs as its own task so this loop stays free to receive the
@@ -262,8 +293,20 @@ async def ws(sock: WebSocket) -> None:
                     reply_task = asyncio.create_task(session.handle_user_message(text))
             elif kind == "confirm_response":
                 approvals.resolve(str(msg.get("id", "")), msg.get("allow") is True)
+            elif kind == "voice_turn":
+                # A finished spoken turn, so typed chat and later voice sessions know it was said.
+                role = {"user": "user", "jarvis": "assistant"}.get(msg.get("role"))
+                text = str(msg.get("text", "")).strip()
+                if role and text:
+                    memory.add_message(role, text, "voice")
+            elif kind == "forget":
+                fact_id = msg.get("id")
+                if isinstance(fact_id, int):
+                    memory.forget_fact(fact_id)
             elif kind == "reset" and not busy:
-                session.history.clear()
+                memory.clear_messages()
+                # This window already cleared itself; only the others need telling.
+                session.mark_cleared()
     except WebSocketDisconnect:
         pass
     finally:
