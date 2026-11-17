@@ -73,7 +73,7 @@ def session_config() -> dict[str, Any]:
 async def create_session(offer_sdp: str) -> str:
     """Open a GPT-Live WebRTC session for the browser's SDP offer and return the SDP answer."""
     if not config.OPENAI_API_KEY:
-        raise VoiceError("Voice needs an OpenAI key. Add OPENAI_API_KEY to .env and restart the core.", 503)
+        raise VoiceError("Voice needs an OpenAI key. Add one from the API key button at the top.", 503)
 
     body = {"session": session_config(), "transport": {"type": "webrtc", "sdp": offer_sdp}}
     try:

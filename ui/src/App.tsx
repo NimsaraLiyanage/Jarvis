@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
+import { KeySetup } from "./KeySetup";
 import { Orb } from "./Orb";
 import { OrbSettings } from "./OrbSettings";
 import { useOrbStyle } from "./orbStyle";
@@ -34,6 +35,9 @@ function Clock() {
 export function App() {
   const jarvis = useJarvis();
   const [typing, setTyping] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
+  // First run: no key yet, so the setup screen stays up until one is saved.
+  const needsKey = jarvis.link === "online" && jarvis.keyStatus?.key_set === false;
 
   const voice = useVoice({ onTranscript: jarvis.appendTranscript, onNote: jarvis.pushNote, energy: jarvis.energy });
   usePushToTalk(voice.pressTalk, voice.releaseTalk, jarvis.link === "online" && jarvis.voiceReady);
@@ -71,6 +75,13 @@ export function App() {
           </span>
         </div>
         <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setKeyOpen(true)}
+            className="font-mono text-[11px] tracking-widest text-dim uppercase hover:text-accent"
+          >
+            API key
+          </button>
           <OrbSettings
             shape={orbStyle.shape}
             theme={orbStyle.theme}
@@ -88,6 +99,7 @@ export function App() {
           model={jarvis.model}
           voice={voice.status}
           voiceReady={jarvis.voiceReady}
+          usage={jarvis.usage}
         />
         <Orb state={orbState} energy={jarvis.energy} shape={orbStyle.shape} theme={orbStyle.theme} />
         <ChatPanel
@@ -104,6 +116,17 @@ export function App() {
           onTypingChange={setTyping}
         />
       </main>
+
+      {(needsKey || keyOpen) && (
+        <KeySetup
+          status={jarvis.keyStatus}
+          onSaved={(status) => {
+            jarvis.setKeyStatus(status);
+            setKeyOpen(false);
+          }}
+          onClose={needsKey ? undefined : () => setKeyOpen(false)}
+        />
+      )}
     </div>
   );
 }

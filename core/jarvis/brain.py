@@ -2,7 +2,7 @@ from typing import Any, AsyncIterator, Literal
 
 import openai
 
-from . import approvals, config, tools
+from . import approvals, config, tools, usage
 
 SYSTEM_PROMPT = f"""You are JARVIS, a personal AI assistant running on the user's own computer.
 
@@ -33,10 +33,14 @@ class OpenAIBrain:
 
     def _get_client(self) -> openai.AsyncOpenAI:
         if not config.OPENAI_API_KEY:
-            raise BrainError("No API key found. Add OPENAI_API_KEY to .env and restart the core.")
+            raise BrainError("No API key set. Add your OpenAI key from the API key button at the top.")
         if self._client is None:
             self._client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
         return self._client
+
+    def reset_client(self) -> None:
+        """Forget the client so the next request uses the current key."""
+        self._client = None
 
     async def stream_reply(self, history: list[dict[str, Any]]) -> AsyncIterator[BrainEvent]:
         """Yield the next assistant turn as it happens and append its text to history."""
@@ -64,6 +68,7 @@ class OpenAIBrain:
                         calls.append(event.item)
                     elif event.type == "response.completed":
                         response_id = event.response.id
+                        usage.record_tokens(config.MODEL, event.response.usage)
                     elif event.type == "response.failed":
                         error = event.response.error
                         raise BrainError(error.message if error else "The model failed to produce a reply.")
@@ -79,7 +84,7 @@ class OpenAIBrain:
                     outputs.append({"type": "function_call_output", "call_id": call.call_id, "output": result.output})
                 request = {"input": outputs, "previous_response_id": response_id}
         except openai.AuthenticationError as e:
-            raise BrainError("The OpenAI API key was rejected. Check OPENAI_API_KEY in .env.") from e
+            raise BrainError("The OpenAI API key was rejected. Set a new key from the API key button at the top.") from e
         except openai.RateLimitError as e:
             # OpenAI also reports an exhausted balance as a 429.
             raise BrainError(f"OpenAI refused the request: {e.message}") from e

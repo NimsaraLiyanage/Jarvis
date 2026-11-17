@@ -1,4 +1,4 @@
-import type { LinkStatus, SystemStats } from "./useJarvis";
+import type { LinkStatus, SystemStats, Usage } from "./useJarvis";
 import type { VoiceStatus } from "./useVoice";
 
 function Meter({ label, value, detail }: { label: string; value: number | null; detail?: string }) {
@@ -31,18 +31,46 @@ function Module({ name, status, on }: { name: string; status: string; on: boolea
   );
 }
 
+function formatTokens(n: number) {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+function UsageSection({ usage }: { usage: Usage }) {
+  const month = new Date(`${usage.month}-01T00:00`).toLocaleDateString([], { month: "long" });
+  return (
+    <section>
+      <h2 className="label mb-3">Usage · {month}</h2>
+      <div className="font-mono text-2xl text-text">${usage.cost.toFixed(usage.cost < 1 ? 3 : 2)}</div>
+      <div className="mt-1 font-mono text-[11px] text-dim">estimated, billed by OpenAI</div>
+      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-[11px]">
+        <dt className="text-dim">Tokens in</dt>
+        <dd className="text-right text-text">{formatTokens(usage.input_tokens)}</dd>
+        <dt className="text-dim">Tokens out</dt>
+        <dd className="text-right text-text">{formatTokens(usage.output_tokens)}</dd>
+        <dt className="text-dim">Voice</dt>
+        <dd className="text-right text-text">{(usage.voice_seconds / 60).toFixed(1)} min</dd>
+      </dl>
+      {usage.unpriced.length > 0 && (
+        <div className="mt-2 text-[11px] text-dim">No price set for {usage.unpriced.join(", ")}, so it isn't in the total.</div>
+      )}
+    </section>
+  );
+}
+
 export function SystemPanel({
   stats,
   link,
   model,
   voice,
   voiceReady,
+  usage,
 }: {
   stats: SystemStats | null;
   link: LinkStatus;
   model: string | null;
   voice: VoiceStatus;
   voiceReady: boolean;
+  usage: Usage | null;
 }) {
   const online = link === "online";
   const voiceLabel = !online ? "--" : !voiceReady ? "NO API KEY" : voice === "live" ? "LIVE" : voice === "connecting" ? "CONNECTING" : "READY";
@@ -64,6 +92,8 @@ export function SystemPanel({
           )}
         </div>
       </section>
+
+      {usage && <UsageSection usage={usage} />}
 
       <section>
         <h2 className="label mb-2">Modules</h2>

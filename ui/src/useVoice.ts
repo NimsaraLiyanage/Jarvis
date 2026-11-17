@@ -34,6 +34,8 @@ interface Live {
   ctx: AudioContext;
   frame: number;
   delegationTimer: number | undefined;
+  // When the session went live, for the usage meter. Voice is billed per second.
+  startedAt: number;
 }
 
 function waitForIce(pc: RTCPeerConnection) {
@@ -79,6 +81,15 @@ async function runTool(call: FunctionCall): Promise<{ label: string; output: str
   }
 }
 
+function reportVoiceSeconds(seconds: number) {
+  void fetch(`${CORE_HTTP}/api/usage/voice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 export function useVoice({ onTranscript, onNote, energy }: Options) {
   const [status, setStatus] = useState<VoiceStatus>("off");
   const [activity, setActivity] = useState<OrbState>("idle");
@@ -117,6 +128,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
       s.dc.close();
       s.pc.close();
       s.audio.srcObject = null;
+      reportVoiceSeconds((performance.now() - s.startedAt) / 1000);
       void s.ctx.close();
     }
     setStatus("off");
@@ -169,7 +181,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
 
       // The events channel has to exist before the offer is created.
       const dc = pc.createDataChannel("oai-events");
-      const session: Live = { pc, dc, mic, audio, ctx: audioCtx, frame: 0, delegationTimer: undefined };
+      const session: Live = { pc, dc, mic, audio, ctx: audioCtx, frame: 0, delegationTimer: undefined, startedAt: 0 };
 
       const setDelegating = (on: boolean) => {
         delegating.current = on;
@@ -258,6 +270,7 @@ export function useVoice({ onTranscript, onNote, energy }: Options) {
 
       // stop() may have been pressed while we were connecting.
       if (!starting.current) throw new DOMException("cancelled", "AbortError");
+      session.startedAt = performance.now();
       live.current = session;
       starting.current = false;
       applyMic();

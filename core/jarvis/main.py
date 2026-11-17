@@ -2,12 +2,13 @@ import asyncio
 import logging
 from typing import Any
 
+import openai
 import psutil
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import approvals, config, tools, voice
+from . import approvals, config, keystore, tools, usage, voice
 from .brain import BrainError, OpenAIBrain
 
 log = logging.getLogger("jarvis")
@@ -16,7 +17,7 @@ app = FastAPI(title="Jarvis Core")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(config.ALLOWED_ORIGINS),
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 brain = OpenAIBrain()
@@ -36,6 +37,14 @@ class VoiceOffer(BaseModel):
 class ToolCall(BaseModel):
     name: str
     arguments: str = "{}"
+
+
+class KeyBody(BaseModel):
+    key: str
+
+
+class VoiceUsage(BaseModel):
+    seconds: float
 
 
 def require_own_ui(request: Request) -> None:
@@ -61,6 +70,64 @@ async def run_tool(call: ToolCall, request: Request) -> dict[str, str]:
     return {"label": result.label, "output": result.output}
 
 
+def key_status() -> dict[str, Any]:
+    key = config.OPENAI_API_KEY
+    return {
+        "key_set": bool(key),
+        "key_hint": f"...{key[-4:]}" if key else None,
+        "key_from_env": config.KEY_FROM_ENV,
+    }
+
+
+@app.get("/api/key")
+async def get_key_status(request: Request) -> dict[str, Any]:
+    require_own_ui(request)
+    return key_status()
+
+
+@app.post("/api/key")
+async def set_key(body: KeyBody, request: Request) -> dict[str, Any]:
+    """Check the key with OpenAI, then save it encrypted for this Windows account."""
+    require_own_ui(request)
+    key = body.key.strip()
+    if not key.startswith("sk-") or len(key) < 20:
+        raise HTTPException(status_code=400, detail="That doesn't look like an OpenAI key. It starts with sk-.")
+    try:
+        await openai.AsyncOpenAI(api_key=key).models.list()
+    except openai.AuthenticationError as e:
+        raise HTTPException(status_code=400, detail="OpenAI rejected this key. Copy it again and check nothing is missing.") from e
+    except openai.APIConnectionError as e:
+        raise HTTPException(status_code=502, detail="Could not reach OpenAI to check the key. Check the internet connection.") from e
+    except openai.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI could not check the key ({e.status_code}): {e.message}") from e
+    try:
+        keystore.save(key)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    config.OPENAI_API_KEY = key
+    config.KEY_FROM_ENV = False
+    brain.reset_client()
+    return key_status()
+
+
+@app.delete("/api/key")
+async def remove_key(request: Request) -> dict[str, Any]:
+    require_own_ui(request)
+    keystore.clear()
+    if not config.KEY_FROM_ENV:
+        config.OPENAI_API_KEY = ""
+        brain.reset_client()
+    return key_status()
+
+
+@app.post("/api/usage/voice")
+async def add_voice_usage(body: VoiceUsage, request: Request) -> dict[str, Any]:
+    """The UI reports how long a voice session stayed open, since only it sees the end."""
+    require_own_ui(request)
+    usage.record_voice(config.VOICE_MODEL, body.seconds)
+    return usage.summary()
+
+
 def system_stats() -> dict[str, Any]:
     mem = psutil.virtual_memory()
     battery = psutil.sensors_battery()
@@ -72,6 +139,9 @@ def system_stats() -> dict[str, Any]:
         "ram_total_gb": round(mem.total / 1024**3, 1),
         "battery": None if battery is None else round(battery.percent),
         "charging": None if battery is None else battery.power_plugged,
+        "usage": usage.summary(),
+        "voice_ready": bool(config.OPENAI_API_KEY),
+        **key_status(),
     }
 
 

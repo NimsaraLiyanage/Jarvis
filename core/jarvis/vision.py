@@ -8,7 +8,7 @@ from typing import Any
 import openai
 from PIL import Image, ImageGrab
 
-from . import config
+from . import config, usage
 
 # Large enough to read normal text, small enough to keep each look cheap.
 MAX_WIDTH = 1600
@@ -71,6 +71,7 @@ def _ask(image: Image.Image, instructions: str, request: str, **options: Any) ->
         raise VisionError(f"the model rejected the screenshot ({e.status_code}: {e.message})") from e
     except openai.APIConnectionError as e:
         raise VisionError("OpenAI could not be reached") from e
+    usage.record_tokens(config.MODEL, response.usage)
     return response.output_text.strip()
 
 

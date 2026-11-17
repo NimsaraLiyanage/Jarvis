@@ -29,6 +29,22 @@ export interface SystemStats {
   charging: boolean | null;
 }
 
+// This month's spend on the user's own key; cost is an estimate from the core's price table.
+export interface Usage {
+  month: string;
+  input_tokens: number;
+  output_tokens: number;
+  voice_seconds: number;
+  cost: number;
+  unpriced: string[];
+}
+
+export interface KeyStatus {
+  key_set: boolean;
+  key_hint: string | null;
+  key_from_env: boolean;
+}
+
 type ServerEvent =
   | { type: "hello"; model: string; voice_ready: boolean }
   | { type: "state"; value: OrbState }
@@ -38,7 +54,7 @@ type ServerEvent =
   | { type: "confirm_closed"; id: string }
   | { type: "done" }
   | { type: "error"; message: string }
-  | ({ type: "system" } & SystemStats);
+  | ({ type: "system"; usage: Usage; voice_ready: boolean } & SystemStats & KeyStatus);
 
 export function useJarvis() {
   const [link, setLink] = useState<LinkStatus>("connecting");
@@ -48,6 +64,8 @@ export function useJarvis() {
   const [model, setModel] = useState<string | null>(null);
   const [voiceReady, setVoiceReady] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
 
   const sockRef = useRef<WebSocket | null>(null);
   const nextId = useRef(1);
@@ -80,6 +98,13 @@ export function useJarvis() {
             break;
           case "system":
             setStats(ev);
+            setUsage(ev.usage);
+            setVoiceReady(ev.voice_ready);
+            setKeyStatus((k) =>
+              k?.key_set === ev.key_set && k.key_hint === ev.key_hint && k.key_from_env === ev.key_from_env
+                ? k
+                : { key_set: ev.key_set, key_hint: ev.key_hint, key_from_env: ev.key_from_env },
+            );
             break;
           case "delta": {
             energy.current = Math.min(1, energy.current + 0.35);
@@ -183,6 +208,9 @@ export function useJarvis() {
     stats,
     model,
     voiceReady,
+    usage,
+    keyStatus,
+    setKeyStatus,
     confirm,
     answerConfirm,
     energy,

@@ -3,10 +3,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from . import keystore
+
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+# A key in .env (handy while developing) wins over the one saved from the setup screen.
+KEY_FROM_ENV = bool(os.getenv("OPENAI_API_KEY", "").strip())
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip() or keystore.load()
 MODEL = os.getenv("JARVIS_MODEL", "gpt-6-luna")
 USER_NAME = os.getenv("JARVIS_USER_NAME", "sir")
 
