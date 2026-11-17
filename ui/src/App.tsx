@@ -58,7 +58,7 @@ export function App() {
 
   const voice = useVoice({ onTranscript: jarvis.appendTranscript, onNote: jarvis.pushNote, energy: jarvis.energy });
   usePushToTalk(voice.pressTalk, voice.releaseTalk, jarvis.link === "online" && jarvis.voiceReady);
-  // Jarvis's last spoken reply has no turn after it, so save it when the session ends.
+  // Onyx's last spoken reply has no turn after it, so save it when the session ends.
   const { endVoiceTurn } = jarvis;
   useEffect(() => {
     if (voice.status === "off") endVoiceTurn();
@@ -75,7 +75,7 @@ export function App() {
           : "idle";
 
   const orbStyle = useOrbStyle();
-  // The whole UI takes its accent from the orb's theme, switching while Jarvis is thinking.
+  // The whole UI takes its accent from the orb's theme, switching while Onyx is thinking.
   const accent = orbState === "thinking" ? orbStyle.theme.thinkAccent : orbStyle.theme.accent;
   // Set on the root element: the accent colour utilities are resolved there, not on this component.
   useEffect(() => {
@@ -87,7 +87,7 @@ export function App() {
       <header className="flex items-center justify-between px-4 pt-3 sm:px-6">
         <div className="flex items-baseline gap-3">
           <h1 className="font-display text-2xl font-bold tracking-[0.3em] text-accent transition-colors duration-500">
-            JARVIS
+            ONYX
           </h1>
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-dim uppercase">
             <span

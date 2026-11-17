@@ -146,7 +146,7 @@ export function Face({ state, energy }: { state: OrbState; energy: RefObject<num
       strokeWidth="0.8"
       strokeLinejoin="round"
       role="img"
-      aria-label="Jarvis"
+      aria-label="Onyx"
     >
       <defs>
         <clipPath id="face-clip">

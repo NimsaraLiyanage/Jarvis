@@ -2,7 +2,7 @@
   "name": "jarvis",
   "private": true,
   "version": "0.1.0",
-  "description": "Personal Jarvis assistant - HUD interface and local core",
+  "description": "Personal Onyx assistant - HUD interface and local core",
   "main": "desktop/main.cjs",
   "scripts": {
     "setup": "python -m venv core/.venv && core\\.venv\\Scripts\\python -m pip install -r core/requirements.txt",

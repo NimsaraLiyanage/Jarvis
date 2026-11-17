@@ -87,7 +87,7 @@ function MemoryList({ facts, onForget }: { facts: Fact[]; onForget: (id: number)
   if (facts.length === 0) {
     return (
       <p className="m-auto max-w-xs text-center text-sm text-dim">
-        Nothing saved yet. Say or type “remember that…” and Jarvis keeps it across restarts, in chat and voice.
+        Nothing saved yet. Say or type “remember that…” and Onyx keeps it across restarts, in chat and voice.
       </p>
     );
   }
@@ -316,8 +316,8 @@ export function ChatPanel({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
           rows={1}
-          aria-label="Message Jarvis"
-          placeholder={link === "online" ? "Talk to Jarvis…" : "Core offline"}
+          aria-label="Message Onyx"
+          placeholder={link === "online" ? "Talk to Onyx…" : "Core offline"}
           className="max-h-32 min-h-10 flex-1 resize-none border border-white/10 bg-black/30 px-3 py-2 text-[15px] text-text outline-none placeholder:text-dim/70 focus:border-accent/60 [field-sizing:content]"
         />
         <button

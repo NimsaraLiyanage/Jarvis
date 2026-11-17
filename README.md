@@ -1,4 +1,4 @@
-# Jarvis
+# Onyx
 
 A personal assistant with a HUD-style interface. Runs as a desktop app (Electron) or in the browser, backed by a local Python core that talks to the OpenAI API.
 
@@ -34,7 +34,7 @@ Put your OpenAI API key in `.env`; the one key runs typed chat and voice. Never 
 |---|---|---|
 | `OPENAI_API_KEY` | — | Required, for typed chat and voice |
 | `JARVIS_MODEL` | `gpt-6-luna` | Model used for typed replies |
-| `JARVIS_USER_NAME` | `sir` | How Jarvis addresses you |
+| `JARVIS_USER_NAME` | `sir` | How Onyx addresses you |
 | `JARVIS_VOICE` | `marin` | GPT-Live voice |
 | `JARVIS_VOICE_BACKEND_MODEL` | `gpt-6-luna` | Model that handles work the voice model delegates |
 
@@ -46,7 +46,7 @@ GPT-Live is billed per second while a session is open, so end the session when y
 
 ## Orb appearance
 
-The Orb button in the top bar changes the orb's shape (Sphere, Ring, Galaxy, Face, Face 3D, Hologram, Robot, Dragon, Astronaut, Animatronic, Robot Toy) and colour theme. Face 3D (`ui/src/Face3D.tsx`) renders a real head model and drives its jaw, lips, blinks, brows and gaze. It loads `ui/public/models/avatar.glb` if you add one, otherwise the bundled `head.glb` (the three.js sample head). Any GLB with ARKit-style face shapes such as `jawOpen` and `eyeBlinkLeft` should work. Face is a drawn hologram portrait (`ui/src/Face.tsx`) whose mouth follows the speech level, and which blinks and shifts its gaze with Jarvis's state. The whole interface takes its accent colour from the theme, and the choice is remembered in the browser. Shapes and themes are defined in `ui/src/orbStyle.ts` and `ui/src/Orb.tsx`.
+The Orb button in the top bar changes the orb's shape (Sphere, Ring, Galaxy, Face, Face 3D, Hologram, Robot, Dragon, Astronaut, Animatronic, Robot Toy) and colour theme. Face 3D (`ui/src/Face3D.tsx`) renders a real head model and drives its jaw, lips, blinks, brows and gaze. It loads `ui/public/models/avatar.glb` if you add one, otherwise the bundled `head.glb` (the three.js sample head). Any GLB with ARKit-style face shapes such as `jawOpen` and `eyeBlinkLeft` should work. Face is a drawn hologram portrait (`ui/src/Face.tsx`) whose mouth follows the speech level, and which blinks and shifts its gaze with Onyx's state. The whole interface takes its accent colour from the theme, and the choice is remembered in the browser. Shapes and themes are defined in `ui/src/orbStyle.ts` and `ui/src/Orb.tsx`.
 
 The Robot shape uses the same component to redraw the bundled head as a face built from mesh nodes: glowing dots joined by the wireframe, with solid glowing eyes. It talks, blinks and looks around the same way, in the theme colour.
 
@@ -58,21 +58,21 @@ Credits: `head.glb` is the sample head from the three.js examples (`facecap.glb`
 
 ## Tools
 
-Jarvis can search the web, open a fixed list of apps, open websites, open a Google search in the browser, read the text of a public web page, and read the system status and time. The tools live in `core/jarvis/tools.py` and work from both typed chat and voice. Most only open things or read status and run straight away.
+Onyx can search the web, open a fixed list of apps, open websites, open a Google search in the browser, read the text of a public web page, and read the system status and time. The tools live in `core/jarvis/tools.py` and work from both typed chat and voice. Most only open things or read status and run straight away.
 
 Tools that change something ask first: an Allow/Deny card appears above the chat box showing exactly what will happen, and no answer within 60 seconds counts as deny. These tools work this way:
 
-- Closing an app's windows, the same as clicking their X. The prompt lists the exact windows. Nothing is force-closed, so an app with unsaved work shows its own save prompt, and the window showing Jarvis is never closed.
+- Closing an app's windows, the same as clicking their X. The prompt lists the exact windows. Nothing is force-closed, so an app with unsaved work shows its own save prompt, and the window showing Onyx is never closed.
 - Typing into Notepad, which stops the moment Notepad loses focus.
 - Saving text as a new `.txt` file, only on the Desktop or in Documents, never overwriting an existing file.
 - Looking at the screen: a screenshot of the primary monitor is sent to OpenAI to answer one question. It asks every time because everything visible is sent.
-- Working inside an app window or web page: the named app's window comes to the front, a screenshot is sent to OpenAI to find the thing described, and Jarvis acts on it. It can left-click once, click a field and type into it (optionally pressing Enter), drag one thing onto another, or right-click something and choose an item from the menu, which takes a second screenshot once the menu is open. The prompt shows the window and the description; the exact spot is only known afterwards. Input that would land outside that window is not sent, and typing stops if the window loses focus. It only finds what is visible on the primary monitor, and how well it aims depends on the model. Run Jarvis with `npm run desktop` for this: as a browser tab it shares a window with the page you want used, and pressing Allow puts Jarvis's tab in front.
+- Working inside an app window or web page: the named app's window comes to the front, a screenshot is sent to OpenAI to find the thing described, and Onyx acts on it. It can left-click once, click a field and type into it (optionally pressing Enter), drag one thing onto another, or right-click something and choose an item from the menu, which takes a second screenshot once the menu is open. The prompt shows the window and the description; the exact spot is only known afterwards. Input that would land outside that window is not sent, and typing stops if the window loses focus. It only finds what is visible on the primary monitor, and how well it aims depends on the model. Run Onyx with `npm run desktop` for this: as a browser tab it shares a window with the page you want used, and pressing Allow puts Onyx's tab in front.
 
 Reading the text in open Notepad windows needs no prompt. Neither does scrolling an app window, which turns the mouse wheel over the middle of it and sends no screenshot.
 
 ## Memory
 
-The conversation and the facts you ask Jarvis to remember ("remember that my sister is Amaya") are kept in `%APPDATA%/Jarvis/memory.db`, so they survive a restart and are shared by the desktop app, the web UI and voice. The Memory button above the transcript lists saved facts and lets you forget them. Clear wipes the conversation but keeps the facts. See [IMPROVEMENTS.md](IMPROVEMENTS.md) for what is planned next.
+The conversation and the facts you ask Onyx to remember ("remember that my sister is Amaya") are kept in `%APPDATA%/Jarvis/memory.db`, so they survive a restart and are shared by the desktop app, the web UI and voice. The Memory button above the transcript lists saved facts and lets you forget them. Clear wipes the conversation but keeps the facts. See [IMPROVEMENTS.md](IMPROVEMENTS.md) for what is planned next.
 
 ## Roadmap
 

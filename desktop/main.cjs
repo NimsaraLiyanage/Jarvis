@@ -10,7 +10,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: "#05080f",
     autoHideMenuBar: true,
-    title: "JARVIS",
+    title: "ONYX",
   });
 
   // Links in replies open in the real browser, never inside the app window.

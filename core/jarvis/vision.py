@@ -1,4 +1,4 @@
-"""Lets Jarvis look at the screen: takes a screenshot and asks the model about it."""
+"""Lets Onyx look at the screen: takes a screenshot and asks the model about it."""
 
 import base64
 import io

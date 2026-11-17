@@ -10,7 +10,7 @@ import os
 from ctypes import wintypes
 from pathlib import Path
 
-DATA_DIR = Path(os.getenv("APPDATA", Path.home())) / "Jarvis"
+DATA_DIR = Path(os.getenv("APPDATA", Path.home())) / "Onyx"
 KEY_FILE = DATA_DIR / "openai_key.bin"
 
 

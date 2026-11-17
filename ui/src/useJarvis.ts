@@ -8,12 +8,12 @@ export type LinkStatus = "connecting" | "online" | "offline";
 
 export interface ChatMessage {
   id: number;
-  // "tool" is a one-line note about an action Jarvis just took.
+  // "tool" is a one-line note about an action Onyx just took.
   role: "user" | "jarvis" | "error" | "tool";
   text: string;
 }
 
-// An action Jarvis wants to take that needs the user's Allow or Deny.
+// An action Onyx wants to take that needs the user's Allow or Deny.
 export interface ConfirmRequest {
   id: string;
   title: string;
@@ -66,7 +66,7 @@ export interface Usage {
   unpriced: string[];
 }
 
-// Something the user asked Jarvis to remember; kept by the core across restarts.
+// Something the user asked Onyx to remember; kept by the core across restarts.
 export interface Fact {
   id: number;
   text: string;

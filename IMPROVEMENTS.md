@@ -1,6 +1,6 @@
 # Improvements
 
-Planned work for Jarvis. Everything runs in the shared core, so each item works in both the desktop app and the web UI.
+Planned work for Onyx. Everything runs in the shared core, so each item works in both the desktop app and the web UI.
 
 ## 1. Memory (most important) — done
 
@@ -10,8 +10,8 @@ Planned work for Jarvis. Everything runs in the shared core, so each item works 
 
 ## 2. Voice improvements
 
-- [ ] Wake word ("Hey Jarvis"): start talking without pressing a key (openWakeWord or Porcupine).
-- [ ] Global hotkey: open Jarvis even when another app is in front.
+- [ ] Wake word ("Hey Onyx"): start talking without pressing a key (openWakeWord or Porcupine).
+- [ ] Global hotkey: open Onyx even when another app is in front.
 
 ## 3. Files
 

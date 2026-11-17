@@ -1,4 +1,4 @@
-"""Actions Jarvis can take on this computer.
+"""Actions Onyx can take on this computer.
 
 Tools that only open things or read status run straight away. Tools that
 change something are listed in _CONFIRM and run only after the user allows
@@ -46,7 +46,7 @@ PAGE_MAX_REDIRECTS = 5
 PAGE_MAX_HTML_CHARS = 2_000_000
 # Enough for a score page or the top of an article without slowing the reply.
 PAGE_MAX_TEXT_CHARS = 8000
-PAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JarvisAssistant/0.1"
+PAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) OnyxAssistant/0.1"
 
 # Friendly name -> what Windows should launch. A fixed list, so the model can
 # never start an arbitrary program.
@@ -73,8 +73,8 @@ APP_PROGRAMS = {
     "edge": ("msedge",),
     "vscode": ("code",),
 }
-# The browser tab or desktop window showing Jarvis starts its title with this; it is never closed.
-JARVIS_WINDOW_TITLE = "JARVIS"
+# The browser tab or desktop window showing Onyx starts its title with this; it is never closed.
+JARVIS_WINDOW_TITLE = "ONYX"
 
 
 @dataclass
@@ -397,7 +397,7 @@ def _is_jarvis(window: winput.Window) -> bool:
 
 
 def _windows_of(app: str) -> list[winput.Window]:
-    """Open windows belonging to the app the user named, never including Jarvis's own window."""
+    """Open windows belonging to the app the user named, never including Onyx's own window."""
     needle = app.lower().strip()
     programs = {needle.replace(" ", ""), *APP_PROGRAMS.get(needle.replace(" ", "_"), ())}
     return [
@@ -411,7 +411,7 @@ def _list_open_apps() -> ToolResult:
     windows = winput.open_windows()
     if not windows:
         return ToolResult("No app windows are open", "No app windows are open.")
-    lines = [f"- {w.process}: {w.title}" + (" (this is Jarvis itself; it cannot be closed)" if _is_jarvis(w) else "") for w in windows]
+    lines = [f"- {w.process}: {w.title}" + (" (this is Onyx itself; it cannot be closed)" if _is_jarvis(w) else "") for w in windows]
     return ToolResult(f"Listed {len(windows)} open windows", "Open windows, front-most first (program: title):\n" + "\n".join(lines))
 
 
@@ -687,7 +687,7 @@ def _screen_prompt(app: str, what: str, then: str) -> str:
     """Detail for a prompt about acting in a window; the exact spot is only known after the screenshot."""
     return (
         f"{what}\n\nIn: {_windows_of(app)[0].title}\n"
-        f"That window comes to the front, a screenshot of your whole screen is sent to OpenAI to find the spot, and Jarvis {then}."
+        f"That window comes to the front, a screenshot of your whole screen is sent to OpenAI to find the spot, and Onyx {then}."
     )
 # Tools that change something. Each maps its arguments to the (title, detail)
 # shown to the user, who must allow that exact action before it runs.
@@ -700,16 +700,16 @@ _CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
     ),
     # Everything visible goes to OpenAI, so the user decides each time.
     "look_at_screen": lambda question: (
-        "Let Jarvis look at your screen?",
+        "Let Onyx look at your screen?",
         f"A screenshot of your whole screen will be sent to OpenAI to answer:\n{question}",
     ),
     "save_text_file": lambda folder, filename, text: (
         f"Save this as a file in {folder.capitalize()}?",
         f"{_safe_filename(filename)}\n\n{text}",
     ),
-    "click_on_screen": lambda app, target: ("Let Jarvis click this?", _screen_prompt(app, target, "left-clicks it once")),
+    "click_on_screen": lambda app, target: ("Let Onyx click this?", _screen_prompt(app, target, "left-clicks it once")),
     "type_on_screen": lambda app, field, text, press_enter: (
-        "Let Jarvis type this?",
+        "Let Onyx type this?",
         _screen_prompt(
             app,
             f"{text}\n\nInto: {field}",
@@ -717,11 +717,11 @@ _CONFIRM: dict[str, Callable[..., tuple[str, str]]] = {
         ),
     ),
     "right_click_menu": lambda app, target, menu_item: (
-        f"Let Jarvis choose “{menu_item}” from a right-click menu?",
+        f"Let Onyx choose “{menu_item}” from a right-click menu?",
         _screen_prompt(app, f"Right-click: {target}", f"right-clicks it, takes a second screenshot and clicks “{menu_item}”"),
     ),
     "drag_on_screen": lambda app, item, destination: (
-        "Let Jarvis drag this?",
+        "Let Onyx drag this?",
         _screen_prompt(app, f"{item}\n\nTo: {destination}", "drags one onto the other with the left button"),
     ),
 }

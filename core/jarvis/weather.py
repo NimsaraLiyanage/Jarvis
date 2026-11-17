@@ -21,7 +21,7 @@ LOCATION_URL = "https://ipapi.co/json/"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 # Turns coordinates into a place name. Its policy asks for an identifying User-Agent.
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
-USER_AGENT = "Jarvis-desktop-assistant/0.1"
+USER_AGENT = "Onyx-desktop-assistant/0.1"
 LOCATION_SCRIPT = Path(__file__).with_name("scripts") / "location.ps1"
 LOCATION_SETTINGS = "ms-settings:privacy-location"
 REFRESH_S = 15 * 60

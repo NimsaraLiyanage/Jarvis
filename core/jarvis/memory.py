@@ -1,7 +1,7 @@
-"""What Jarvis remembers between restarts, kept in %APPDATA%/Jarvis/memory.db.
+"""What Onyx remembers between restarts, kept in %APPDATA%/Jarvis/memory.db.
 
 Messages are one conversation shared by typed chat and voice, so either can
-pick up where the other left off. Facts are things the user asked Jarvis to
+pick up where the other left off. Facts are things the user asked Onyx to
 remember; they go into every prompt until the user has them forgotten.
 """
 
@@ -150,5 +150,5 @@ def voice_recap() -> str:
         text = " ".join(m["content"].split())
         if len(text) > VOICE_RECAP_CHARS:
             text = text[:VOICE_RECAP_CHARS] + "…"
-        lines.append(f"{'User' if m['role'] == 'user' else 'Jarvis'}: {text}")
+        lines.append(f"{'User' if m['role'] == 'user' else 'Onyx'}: {text}")
     return "\n\nThe conversation so far, typed or spoken, possibly from an earlier session:\n" + "\n".join(lines)

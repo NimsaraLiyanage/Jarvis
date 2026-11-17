@@ -33,7 +33,7 @@ export function KeySetup({
       setKey("");
       onSaved(body as KeyStatus);
     } catch (err) {
-      setError(err instanceof TypeError ? "Could not reach the Jarvis core." : err instanceof Error ? err.message : "Something went wrong.");
+      setError(err instanceof TypeError ? "Could not reach the Onyx core." : err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setBusy(false);
     }
@@ -51,7 +51,7 @@ export function KeySetup({
           <div>
             <h2 className="font-display text-xl font-bold tracking-[0.2em] text-accent">OPENAI API KEY</h2>
             <p className="mt-2 text-sm text-dim">
-              Jarvis runs on your own OpenAI account, so OpenAI bills you directly for what you use.
+              Onyx runs on your own OpenAI account, so OpenAI bills you directly for what you use.
             </p>
           </div>
 

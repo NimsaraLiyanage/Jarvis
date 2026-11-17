@@ -24,7 +24,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task.cancel()
 
 
-app = FastAPI(title="Jarvis Core", lifespan=lifespan)
+app = FastAPI(title="Onyx Core", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(config.ALLOWED_ORIGINS),

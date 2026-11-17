@@ -7,7 +7,7 @@ const ICE_TIMEOUT_MS = 3000;
 const CLOSE_TIMEOUT_MS = 1500;
 // Backend work that never reports completion stops showing as "thinking" after this.
 const DELEGATION_TIMEOUT_MS = 60_000;
-// Jarvis counts as speaking above this output level, and for a short hold after.
+// Onyx counts as speaking above this output level, and for a short hold after.
 const SPEAKING_LEVEL = 0.015;
 const SPEAKING_HOLD_MS = 350;
 // The mic stays open this long after Space is released so the last word isn't clipped.
