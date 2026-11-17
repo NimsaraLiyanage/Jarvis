@@ -1,6 +1,8 @@
 import asyncio
 import logging
-from typing import Any
+import time
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
 import openai
 import psutil
@@ -8,12 +10,21 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import approvals, config, keystore, tools, usage, voice
+from . import approvals, config, devices, keystore, tools, usage, voice, weather
 from .brain import BrainError, OpenAIBrain
 
 log = logging.getLogger("jarvis")
 
-app = FastAPI(title="Jarvis Core")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Background watchers for the HUD; the stats ticker only reads their latest result.
+    watchers = [asyncio.create_task(devices.watch()), asyncio.create_task(weather.watch())]
+    yield
+    for task in watchers:
+        task.cancel()
+
+
+app = FastAPI(title="Jarvis Core", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(config.ALLOWED_ORIGINS),
@@ -120,6 +131,20 @@ async def remove_key(request: Request) -> dict[str, Any]:
     return key_status()
 
 
+@app.post("/api/location/settings")
+async def location_settings(request: Request) -> dict[str, bool]:
+    """Opens the Windows privacy page where the user can allow location."""
+    require_own_ui(request)
+    weather.open_location_settings()
+    return {"ok": True}
+
+
+@app.post("/api/location/refresh")
+async def location_refresh(request: Request) -> dict[str, Any]:
+    require_own_ui(request)
+    return await weather.refresh()
+
+
 @app.post("/api/usage/voice")
 async def add_voice_usage(body: VoiceUsage, request: Request) -> dict[str, Any]:
     """The UI reports how long a voice session stayed open, since only it sees the end."""
@@ -128,8 +153,25 @@ async def add_voice_usage(body: VoiceUsage, request: Request) -> dict[str, Any]:
     return usage.summary()
 
 
+_last_net: tuple[float, int, int] | None = None
+
+
+def network_rates() -> tuple[float, float]:
+    """Bytes per second sent and received since the previous call."""
+    global _last_net
+    io = psutil.net_io_counters()
+    now = time.monotonic()
+    prev, _last_net = _last_net, (now, io.bytes_sent, io.bytes_recv)
+    if prev is None or now <= prev[0]:
+        return 0.0, 0.0
+    span = now - prev[0]
+    return (io.bytes_sent - prev[1]) / span, (io.bytes_recv - prev[2]) / span
+
+
 def system_stats() -> dict[str, Any]:
     mem = psutil.virtual_memory()
+    up, down = network_rates()
+    disk = psutil.disk_usage(str(config.ROOT.anchor))
     battery = psutil.sensors_battery()
     return {
         "type": "system",
@@ -139,7 +181,13 @@ def system_stats() -> dict[str, Any]:
         "ram_total_gb": round(mem.total / 1024**3, 1),
         "battery": None if battery is None else round(battery.percent),
         "charging": None if battery is None else battery.power_plugged,
+        "net_up": round(up),
+        "net_down": round(down),
+        "disk": disk.percent,
+        "uptime_s": round(time.time() - psutil.boot_time()),
         "usage": usage.summary(),
+        "devices": devices.latest(),
+        "weather": weather.latest(),
         "voice_ready": bool(config.OPENAI_API_KEY),
         **key_status(),
     }

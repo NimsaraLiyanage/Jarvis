@@ -27,6 +27,33 @@ export interface SystemStats {
   ram_total_gb: number;
   battery: number | null;
   charging: boolean | null;
+  net_up: number; // bytes per second
+  net_down: number;
+  disk: number;
+  uptime_s: number;
+}
+
+export interface Device {
+  kind: "bluetooth" | "usb";
+  id: string;
+  name: string;
+}
+
+export interface Weather {
+  city: string;
+  // "windows" is Windows Location (Wi-Fi based, precise); "ip" is the rough fallback.
+  source: "windows" | "ip";
+  accuracy_m: number | null;
+  windows_status: string;
+  temp: number;
+  feels_like: number;
+  humidity: number;
+  wind_kmh: number;
+  code: number;
+  condition: string;
+  is_day: boolean;
+  high: number;
+  low: number;
 }
 
 // This month's spend on the user's own key; cost is an estimate from the core's price table.
@@ -54,7 +81,7 @@ type ServerEvent =
   | { type: "confirm_closed"; id: string }
   | { type: "done" }
   | { type: "error"; message: string }
-  | ({ type: "system"; usage: Usage; voice_ready: boolean } & SystemStats & KeyStatus);
+  | ({ type: "system"; usage: Usage; voice_ready: boolean; devices: Device[]; weather: Weather | null } & SystemStats & KeyStatus);
 
 export function useJarvis() {
   const [link, setLink] = useState<LinkStatus>("connecting");
@@ -65,6 +92,8 @@ export function useJarvis() {
   const [voiceReady, setVoiceReady] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [weather, setWeather] = useState<Weather | null>(null);
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
 
   const sockRef = useRef<WebSocket | null>(null);
@@ -99,6 +128,8 @@ export function useJarvis() {
           case "system":
             setStats(ev);
             setUsage(ev.usage);
+            setDevices(ev.devices);
+            setWeather(ev.weather);
             setVoiceReady(ev.voice_ready);
             setKeyStatus((k) =>
               k?.key_set === ev.key_set && k.key_hint === ev.key_hint && k.key_from_env === ev.key_from_env
@@ -209,6 +240,8 @@ export function useJarvis() {
     model,
     voiceReady,
     usage,
+    devices,
+    weather,
     keyStatus,
     setKeyStatus,
     confirm,

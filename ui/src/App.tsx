@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
+import { HudWidgets } from "./HudWidgets";
 import { KeySetup } from "./KeySetup";
 import { Orb } from "./Orb";
 import { OrbSettings } from "./OrbSettings";
@@ -36,6 +37,22 @@ export function App() {
   const jarvis = useJarvis();
   const [typing, setTyping] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("jarvis.transcriptCollapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleCollapsed = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem("jarvis.transcriptCollapsed", c ? "0" : "1");
+      } catch {
+        // Not remembered; it still toggles.
+      }
+      return !c;
+    });
   // First run: no key yet, so the setup screen stays up until one is saved.
   const needsKey = jarvis.link === "online" && jarvis.keyStatus?.key_set === false;
 
@@ -114,6 +131,9 @@ export function App() {
           onSend={jarvis.send}
           onReset={jarvis.reset}
           onTypingChange={setTyping}
+          collapsed={collapsed}
+          onToggleCollapsed={toggleCollapsed}
+          widgets={<HudWidgets stats={jarvis.stats} devices={jarvis.devices} weather={jarvis.weather} />}
         />
       </main>
 

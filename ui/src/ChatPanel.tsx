@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { ChatMessage, ConfirmRequest, LinkStatus } from "./useJarvis";
 import type { VoiceStatus } from "./useVoice";
 
@@ -126,6 +126,9 @@ export function ChatPanel({
   onSend,
   onReset,
   onTypingChange,
+  collapsed,
+  onToggleCollapsed,
+  widgets,
 }: {
   messages: ChatMessage[];
   link: LinkStatus;
@@ -138,14 +141,25 @@ export function ChatPanel({
   onSend: (text: string) => void;
   onReset: () => void;
   onTypingChange: (typing: boolean) => void;
+  // Collapsed hides the messages and shows the HUD widgets in their place; the input stays.
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  widgets: ReactNode;
 }) {
+  // Messages that arrived while collapsed, shown as a count on the toggle.
+  const [seen, setSeen] = useState(messages.length);
+  useEffect(() => {
+    if (!collapsed || messages.length < seen) setSeen(messages.length);
+  }, [collapsed, messages.length, seen]);
+  const unread = collapsed ? messages.length - seen : 0;
+
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const canSend = link === "online" && !isStreaming;
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages]);
+  }, [messages, collapsed]);
 
   useEffect(() => {
     onTypingChange(draft.trim().length > 0);
@@ -175,19 +189,42 @@ export function ChatPanel({
   return (
     <section className="panel flex min-h-0 flex-col">
       <header className="flex items-center justify-between border-b border-white/5 px-5 py-3">
-        <h2 className="label">Transcript</h2>
         <button
           type="button"
-          onClick={onReset}
-          disabled={messages.length === 0 || isStreaming}
-          className="font-display text-xs font-semibold tracking-widest text-dim uppercase transition-colors hover:text-accent disabled:opacity-30 disabled:hover:text-dim"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          className="label flex items-center gap-2 transition-colors hover:text-accent"
         >
-          Clear
+          <svg viewBox="0 0 12 12" className={`h-3 w-3 transition-transform ${collapsed ? "-rotate-90" : ""}`} fill="currentColor" aria-hidden="true">
+            <path d="M2 4h8L6 9z" />
+          </svg>
+          {collapsed ? "Status" : "Transcript"}
+          {unread > 0 && <span className="bg-accent px-1.5 font-mono text-[10px] text-ink">{unread}</span>}
         </button>
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="font-display text-xs font-semibold tracking-widest text-dim uppercase transition-colors hover:text-accent"
+          >
+            Show transcript
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onReset}
+            disabled={messages.length === 0 || isStreaming}
+            className="font-display text-xs font-semibold tracking-widest text-dim uppercase transition-colors hover:text-accent disabled:opacity-30 disabled:hover:text-dim"
+          >
+            Clear
+          </button>
+        )}
       </header>
 
       <div ref={listRef} className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
-        {messages.length === 0 ? (
+        {collapsed ? (
+          widgets
+        ) : messages.length === 0 ? (
           <div className="m-auto flex max-w-xs flex-col items-center gap-4 text-center">
             <p className="font-display text-2xl font-semibold tracking-wide">{greeting()}.</p>
             <p className="text-sm text-dim">
